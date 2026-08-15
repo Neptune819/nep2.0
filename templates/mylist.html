@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的番剧 - 番剧推荐</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='nep-theme.css') }}?v=3.0">
+</head>
+<body>
+    <!-- 背景图层 -->
+    <div class="bg-image" id="bg-image"></div>
+    <div class="bg-overlay"></div>
+    <div class="sakura-container" id="sakura-container"></div>
+
+    <!-- 背景图选择器 -->
+    <div id="bg-picker" class="bg-picker">
+        <button id="bg-toggle" class="bg-btn" title="切换背景">🖼️</button>
+        <div id="bg-panel" class="bg-panel">
+            <div class="bg-header">
+                <h3>🖼️ 背景图</h3>
+                <button id="bg-upload-btn" class="btn-secondary btn-small" style="padding:4px 10px;font-size:12px;">上传</button>
+                <input type="file" id="bg-file-input" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp" style="display:none">
+            </div>
+            <div id="bg-grid" class="bg-grid">
+                <div class="bg-empty">加载中…</div>
+            </div>
+            <div class="bg-actions">
+                <button id="bg-clear">🎨 用默认渐变</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='animematch-bg.js') }}?v=1.0"></script>
+
+    <header>
+        <h1>📚 我的番剧</h1>
+        <p class="subtitle">共 <span id="list-count">0</span> 部</p>
+        <div style="margin-top: 12px;">
+            <a href="/app" class="btn-secondary" style="text-decoration:none; display:inline-block;">← 返回推荐</a>
+        </div>
+    </header>
+
+    <main>
+        <!-- Tab 切换 -->
+        <nav class="mylist-tabs">
+            <button class="mylist-tab active" data-tab="favorites">⭐ 收藏列表 <span id="fav-count" class="tab-count">0</span></button>
+            <button class="mylist-tab" data-tab="watchlist">📌 待看列表 <span id="watch-count" class="tab-count">0</span></button>
+        </nav>
+
+        <!-- ===== 收藏列表 Tab ===== -->
+        <section id="tab-favorites" class="mylist-content active">
+            <div class="list-actions">
+                <button id="btn-export" class="btn-secondary btn-small">📥 导出</button>
+                <button id="btn-import" class="btn-secondary btn-small">📤 导入</button>
+                <input type="file" id="import-file" accept=".json" style="display:none">
+            </div>
+            <div class="list-filters">
+                <input type="text" id="filter-search" placeholder="搜索番剧名..." class="filter-input">
+                <select id="filter-rating" class="filter-select">
+                    <option value="">全部评分</option>
+                    <option value="10">10分</option>
+                    <option value="9">9分</option>
+                    <option value="8">8分</option>
+                    <option value="7">7分</option>
+                    <option value="6">6分及以下</option>
+                </select>
+                <select id="filter-sort" class="filter-select">
+                    <option value="default">默认排序</option>
+                    <option value="rating-desc">评分从高到低</option>
+                    <option value="rating-asc">评分从低到高</option>
+                    <option value="name">按名称排序</option>
+                </select>
+                <button id="btn-clear-all" class="btn-secondary btn-danger btn-small">清空</button>
+            </div>
+            <div id="anime-list" class="anime-grid"></div>
+            <div id="empty-msg" class="empty" style="display:none">
+                还没有收藏番剧。<br>
+                <a href="/app" style="color:var(--c-accent);">去推荐页收藏 →</a>
+            </div>
+        </section>
+
+        <!-- ===== 待看列表 Tab ===== -->
+        <section id="tab-watchlist" class="mylist-content">
+            <div class="list-filters">
+                <input type="text" id="wl-filter-search" placeholder="搜索待看番剧..." class="filter-input">
+                <select id="wl-filter-sort" class="filter-select">
+                    <option value="default">默认排序</option>
+                    <option value="name">按名称排序</option>
+                    <option value="year">按年份排序</option>
+                </select>
+                <button id="btn-wl-clear" class="btn-secondary btn-danger btn-small">清空</button>
+            </div>
+            <div id="watchlist-grid" class="anime-grid"></div>
+            <div id="wl-empty-msg" class="empty" style="display:none">
+                待看列表为空。<br>
+                <a href="/app" style="color:var(--c-accent);">去推荐页添加待看 →</a>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>💡 提示：在推荐页点击番剧卡片，可加入收藏或待看</p>
+    </footer>
+
+    <!-- ===== 番剧详情弹窗 ===== -->
+    <div id="anime-detail-overlay" class="detail-overlay">
+        <div class="detail-modal">
+            <button class="detail-close" title="关闭" onclick="closeDetail()">&times;</button>
+            <div class="detail-scroll">
+                <!-- 内容由JavaScript动态生成 -->
+            </div>
+            <div class="detail-footer">
+                <button id="detail-btn-watchlist" class="btn-secondary">📌 加入待看</button>
+                <button id="detail-btn-favorite" class="btn-secondary">⭐ 收藏</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ===== 常量 =====
+    const WATCHLIST_KEY = 'anime_watchlist';
+    const FAVORITES_KEY = 'anime_history';
+
+    // ===== localStorage 工具 =====
+    function loadList(key) {
+        try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : []; } catch(e) { return []; }
+    }
+    function saveList(key, list) {
+        try { localStorage.setItem(key, JSON.stringify(list)); } catch(e) {}
+    }
+    function isInList(key, id) {
+        return loadList(key).some(a => a.id === id);
+    }
+    function addToList(key, anime) {
+        const list = loadList(key);
+        if (list.some(a => a.id === anime.id)) return false;
+        list.push({
+            id: anime.id,
+            name: anime.name_cn || anime.name || '',
+            name_cn: anime.name_cn || '',
+            name_en: anime.name || '',
+            image: anime.image || '',
+            rating: anime.rating || 0,
+            year: anime.year || null,
+            format: anime.format || null,
+            tags_cn: (anime.tags || []).map(t => typeof t === 'string' ? t : (t.cn || t.en)).slice(0, 5),
+            tags: (anime.tags || []).map(t => typeof t === 'string' ? t : (t.cn || t.en)).slice(0, 5),
+        });
+        saveList(key, list);
+        return true;
+    }
+    function removeFromList(key, id) {
+        saveList(key, loadList(key).filter(a => a.id !== id));
+    }
+
+    function escapeHtml(s) {
+        if (!s) return '';
+        return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+    }
+
+    // ===== Tab 切换 =====
+    document.querySelectorAll('.mylist-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.mylist-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.mylist-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            updateCounts();
+        });
+    });
+
+    // ===== 收藏列表 =====
+    let animeList = loadList(FAVORITES_KEY);
+    // 修复旧数据
+    animeList = animeList.map(a => (a.rating === 7 && !a._userRated) ? {...a, rating: 0} : a);
+    saveList(FAVORITES_KEY, animeList);
+
+    function renderFavorites(filter = {}) {
+        let filtered = [...animeList];
+        if (filter.search) {
+            const q = filter.search.toLowerCase();
+            filtered = filtered.filter(a =>
+                (a.name_cn||'').toLowerCase().includes(q) || (a.name||'').toLowerCase().includes(q)
+            );
+        }
+        if (filter.rating) {
+            const r = parseInt(filter.rating);
+            filtered = r === 6 ? filtered.filter(a => a.rating <= 6) : filtered.filter(a => a.rating === r);
+        }
+        if (filter.sort === 'rating-desc') filtered.sort((a,b) => b.rating - a.rating);
+        else if (filter.sort === 'rating-asc') filtered.sort((a,b) => a.rating - b.rating);
+        else if (filter.sort === 'name') filtered.sort((a,b) => (a.name_cn||a.name||'').localeCompare(b.name_cn||b.name||''));
+
+        const container = document.getElementById('anime-list');
+        const emptyMsg = document.getElementById('empty-msg');
+        document.getElementById('fav-count').textContent = filtered.length;
+
+        if (filtered.length === 0) {
+            container.innerHTML = '';
+            emptyMsg.style.display = 'block';
+            return;
+        }
+        emptyMsg.style.display = 'none';
+
+        container.innerHTML = filtered.map(a => {
+            const displayRating = a.rating || 0;
+            const isUserRated = a.rating && a.rating > 0;
+            const tags = (a.tags_cn || a.tags || []).slice(0, 3);
+            return `
+            <div class="anime-card" data-id="${a.id}" onclick="openDetail(${a.id})" style="cursor:pointer;">
+                <img class="image" src="${escapeHtml(a.image)}" loading="lazy" onerror="this.style.background='#374151'; this.removeAttribute('src')">
+                <div class="body">
+                    <div class="title">${escapeHtml(a.name_cn || a.name)}</div>
+                    <div class="meta">
+                        ${isUserRated ? `<span class="rating-badge user-rated">⭐ ${displayRating}</span>` : `<span class="rating-badge no-rated">未打分</span>`}
+                        ${a.year ? `<span>${a.year}</span>` : ''}
+                        ${a.format ? `<span>${a.format}</span>` : ''}
+                    </div>
+                    ${tags.length ? `<div class="tags">${tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                    <div class="card-actions">
+                        <select class="rating-select" data-id="${a.id}" onclick="event.stopPropagation()">
+                            <option value="0" ${!a.rating ? 'selected' : ''}>未打分</option>
+                            ${[10,9,8,7,6,5,4,3,2,1].map(r => `<option value="${r}" ${a.rating===r?'selected':''}>${r}分</option>`).join('')}
+                        </select>
+                        <button class="btn-remove" onclick="event.stopPropagation(); removeFav(${a.id})">移除</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        container.querySelectorAll('.rating-select').forEach(sel => {
+            sel.addEventListener('change', e => {
+                const id = parseInt(e.target.dataset.id);
+                const anime = animeList.find(a => a.id === id);
+                if (anime) { anime.rating = parseInt(e.target.value); saveList(FAVORITES_KEY, animeList); }
+            });
+        });
+    }
+
+    function removeFav(id) {
+        if (confirm('确定要移除这部番剧吗？')) {
+            animeList = animeList.filter(a => a.id !== id);
+            saveList(FAVORITES_KEY, animeList);
+            renderFavorites(getFilters());
+            updateCounts();
+        }
+    }
+
+    // ===== 待看列表 =====
+    function renderWatchlist(filter = {}) {
+        let list = loadList(WATCHLIST_KEY);
+        if (filter.search) {
+            const q = filter.search.toLowerCase();
+            list = list.filter(a => (a.name_cn||'').toLowerCase().includes(q) || (a.name||'').toLowerCase().includes(q));
+        }
+        if (filter.sort === 'name') list.sort((a,b) => (a.name_cn||a.name||'').localeCompare(b.name_cn||b.name||''));
+        else if (filter.sort === 'year') list.sort((a,b) => (b.year||0) - (a.year||0));
+
+        const container = document.getElementById('watchlist-grid');
+        const emptyMsg = document.getElementById('wl-empty-msg');
+        document.getElementById('watch-count').textContent = list.length;
+
+        if (list.length === 0) {
+            container.innerHTML = '';
+            emptyMsg.style.display = 'block';
+            return;
+        }
+        emptyMsg.style.display = 'none';
+
+        container.innerHTML = list.map(a => {
+            const tags = (a.tags_cn || a.tags || []).slice(0, 3);
+            return `
+            <div class="anime-card" data-id="${a.id}" onclick="openDetail(${a.id})" style="cursor:pointer;">
+                <img class="image" src="${escapeHtml(a.image)}" loading="lazy" onerror="this.style.background='#374151'; this.removeAttribute('src')">
+                <div class="body">
+                    <div class="title">${escapeHtml(a.name_cn || a.name)}</div>
+                    <div class="meta">
+                        ${a.year ? `<span>📅 ${a.year}</span>` : ''}
+                        ${a.format ? `<span>${a.format}</span>` : ''}
+                    </div>
+                    ${tags.length ? `<div class="tags">${tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                    <div class="card-actions">
+                        <button class="btn-primary btn-small" onclick="event.stopPropagation(); moveToWatchlist(${a.id})">⭐ 转为收藏</button>
+                        <button class="btn-remove" onclick="event.stopPropagation(); removeWatch(${a.id})">移除</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function removeWatch(id) {
+        if (confirm('确定要从待看列表移除吗？')) {
+            removeFromList(WATCHLIST_KEY, id);
+            renderWatchlist(getWlFilters());
+            updateCounts();
+        }
+    }
+
+    function moveToWatchlist(id) {
+        const list = loadList(WATCHLIST_KEY);
+        const anime = list.find(a => a.id === id);
+        if (anime) {
+            addToList(FAVORITES_KEY, anime);
+            removeFromList(WATCHLIST_KEY, id);
+            animeList = loadList(FAVORITES_KEY);
+            renderFavorites(getFilters());
+            renderWatchlist(getWlFilters());
+            updateCounts();
+        }
+    }
+
+    // ===== 详情弹窗 =====
+    let currentDetailId = null;
+    let currentDetailData = null;
+
+    async function openDetail(id) {
+        const overlay = document.getElementById('anime-detail-overlay');
+        overlay.style.display = 'flex';
+        overlay.classList.add('show');
+        document.body.style.overflow = 'hidden';
+        currentDetailId = id;
+        const scroll = overlay.querySelector('.detail-scroll');
+        scroll.innerHTML = '<div class="detail-loading">加载中...</div>';
+        try {
+            const r = await fetch('/api/anime/' + id);
+            if (!r.ok) throw new Error('not found');
+            const data = await r.json();
+            currentDetailData = data;
+            renderDetail(data);
+        } catch(e) {
+            scroll.innerHTML = '<div class="detail-loading" style="color:#f87171">加载失败</div>';
+        }
+    }
+
+    function closeDetail() {
+        const overlay = document.getElementById('anime-detail-overlay');
+        if (overlay) {
+            overlay.classList.remove('show');
+            overlay.style.display = 'none';
+            document.body.style.overflow = '';
+        }
+        currentDetailId = null;
+        currentDetailData = null;
+    }
+
+    function renderDetail(data) {
+        const a = data.anime;
+        const scroll = document.querySelector('#anime-detail-overlay .detail-scroll');
+        const title = a.name_cn || a.name_original || '(无标题)';
+        const original = a.name_original || a.name_jp || '';
+
+        // 统计
+        const statsHtml = [];
+        if (a.rating > 0) statsHtml.push(`<span class="detail-stat rating-stat">⭐ ${a.rating.toFixed(1)}</span>`);
+        if (a.favourites > 0) statsHtml.push(`<span class="detail-stat pop-stat">❤️ ${a.favourites.toLocaleString()}</span>`);
+        if (a.year) statsHtml.push(`<span class="detail-stat year-stat">📅 ${a.year}</span>`);
+        if (a.format) statsHtml.push(`<span class="detail-stat year-stat">${a.format}</span>`);
+        if (a.eps > 0) statsHtml.push(`<span class="detail-stat year-stat">${a.eps} 话</span>`);
+        if (a.status) {
+            const sm = {'FINISHED':'已完结','RELEASING':'放送中','NOT_YET_RELEASED':'未开播','CANCELLED':'已取消','HIATUS':'停更中'};
+            statsHtml.push(`<span class="detail-stat status-stat">${sm[a.status]||a.status}</span>`);
+        }
+
+        // 标签
+        const tagsHtml = (a.tags||[]).map(t => `<span class="detail-tag">${escapeHtml(t.cn||t.en)}</span>`).join('');
+
+        // 声优
+        const vaHtml = (a.va||[]).map(v => `
+            <div class="detail-va-item">
+                <div class="va-line"><span class="va-jp">🎙️ ${escapeHtml(v.name)}</span>${v.cn?`<span class="va-cn">${escapeHtml(v.cn)}</span>`:''}</div>
+                <div class="va-char">饰 ${escapeHtml(v.character||'?')}</div>
+            </div>`).join('');
+
+        // Staff
+        const staffHtml = (a.staff||[]).map(s => `
+            <div class="detail-staff-item"><span class="staff-role">${escapeHtml(s.role_cn||s.role)}</span><span class="staff-name">${escapeHtml(s.name)}</span></div>`).join('');
+
+        // 相似
+        const similarHtml = (data.similar||[]).map(s => `
+            <div class="detail-mini-card" onclick="openDetail(${s.id})">
+                <img src="${escapeHtml(s.image)}" loading="lazy" onerror="this.style.background='#374151';this.removeAttribute('src')">
+                <div class="mini-body"><div class="mini-title">${escapeHtml(s.name_cn||s.name)}</div></div>
+            </div>`).join('');
+
+        const summary = (a.summary||'').trim().replace(/<br\s*\/?>/gi,'\n').slice(0,1500);
+
+        scroll.innerHTML = `
+            <div class="detail-header">
+                <div class="detail-cover"><img src="${escapeHtml(a.image)}" alt="${escapeHtml(title)}" onerror="this.style.background='#374151'"></div>
+                <div class="detail-meta">
+                    <h2>${escapeHtml(title)}</h2>
+                    ${original?`<div class="detail-original-name">${escapeHtml(original)}</div>`:''}
+                    <div class="detail-stats">${statsHtml.join('')}</div>
+                    ${tagsHtml?`<div class="detail-tags">${tagsHtml}</div>`:''}
+                </div>
+            </div>
+            ${summary?`<div class="detail-section"><h3>📖 简介</h3><p>${escapeHtml(summary)}</p></div>`:''}
+            ${staffHtml?`<div class="detail-section"><h3>📋 制作信息</h3><div class="detail-staff-grid">${staffHtml}</div></div>`:''}
+            ${vaHtml?`<div class="detail-section"><h3>🎤 声优阵容</h3><div class="detail-va-grid">${vaHtml}</div></div>`:''}
+            ${similarHtml?`<div class="detail-section"><h3>🎯 相似番剧</h3><div class="detail-card-row">${similarHtml}</div></div>`:''}
+        `;
+
+        // 绑定 mini card 点击
+        scroll.querySelectorAll('.detail-mini-card').forEach(card => {
+            card.addEventListener('click', () => { const cid = parseInt(card.dataset.id||card.onclick?.toString().match(/\d+/)?.[0]); if(cid) openDetail(cid); });
+        });
+
+        // 待看按钮
+        const btnWatch = document.getElementById('detail-btn-watchlist');
+        if (btnWatch) {
+            const inWL = isInList(WATCHLIST_KEY, a.id);
+            btnWatch.textContent = inWL ? '📌 已在待看' : '📌 加入待看';
+            btnWatch.classList.toggle('btn-added', inWL);
+            btnWatch.onclick = () => {
+                if (isInList(WATCHLIST_KEY, a.id)) {
+                    removeFromList(WATCHLIST_KEY, a.id);
+                    btnWatch.textContent = '📌 加入待看';
+                    btnWatch.classList.remove('btn-added');
+                } else {
+                    addToList(WATCHLIST_KEY, a);
+                    btnWatch.textContent = '📌 已在待看';
+                    btnWatch.classList.add('btn-added');
+                }
+                renderWatchlist(getWlFilters());
+                updateCounts();
+            };
+        }
+
+        // 收藏按钮
+        const btnFav = document.getElementById('detail-btn-favorite');
+        if (btnFav) {
+            const inFav = isInList(FAVORITES_KEY, a.id);
+            btnFav.textContent = inFav ? '⭐ 已收藏' : '⭐ 收藏';
+            btnFav.classList.toggle('btn-added', inFav);
+            btnFav.onclick = () => {
+                if (isInList(FAVORITES_KEY, a.id)) {
+                    removeFromList(FAVORITES_KEY, a.id);
+                    btnFav.textContent = '⭐ 收藏';
+                    btnFav.classList.remove('btn-added');
+                    animeList = loadList(FAVORITES_KEY);
+                } else {
+                    addToList(FAVORITES_KEY, a);
+                    btnFav.textContent = '⭐ 已收藏';
+                    btnFav.classList.add('btn-added');
+                    animeList = loadList(FAVORITES_KEY);
+                }
+                renderFavorites(getFilters());
+                updateCounts();
+            };
+        }
+    }
+
+    // ESC 关闭
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+
+    // ===== 筛选 =====
+    function getFilters() {
+        return {
+            search: document.getElementById('filter-search').value,
+            rating: document.getElementById('filter-rating').value,
+            sort: document.getElementById('filter-sort').value
+        };
+    }
+    function getWlFilters() {
+        return {
+            search: document.getElementById('wl-filter-search').value,
+            sort: document.getElementById('wl-filter-sort').value
+        };
+    }
+
+    document.getElementById('filter-search').addEventListener('input', () => renderFavorites(getFilters()));
+    document.getElementById('filter-rating').addEventListener('change', () => renderFavorites(getFilters()));
+    document.getElementById('filter-sort').addEventListener('change', () => renderFavorites(getFilters()));
+    document.getElementById('wl-filter-search').addEventListener('input', () => renderWatchlist(getWlFilters()));
+    document.getElementById('wl-filter-sort').addEventListener('change', () => renderWatchlist(getWlFilters()));
+
+    // 清空
+    document.getElementById('btn-clear-all').addEventListener('click', () => {
+        if (confirm('确定要清空收藏列表吗？')) { animeList = []; saveList(FAVORITES_KEY, animeList); renderFavorites(getFilters()); updateCounts(); }
+    });
+    document.getElementById('btn-wl-clear').addEventListener('click', () => {
+        if (confirm('确定要清空待看列表吗？')) { saveList(WATCHLIST_KEY, []); renderWatchlist(getWlFilters()); updateCounts(); }
+    });
+
+    // 导出
+    document.getElementById('btn-export').addEventListener('click', () => {
+        const data = JSON.stringify(animeList, null, 2);
+        const blob = new Blob([data], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'anime_list_' + new Date().toISOString().slice(0,10) + '.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // 导入
+    document.getElementById('btn-import').addEventListener('click', () => document.getElementById('import-file').click());
+    document.getElementById('import-file').addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+            try {
+                const imported = JSON.parse(ev.target.result);
+                if (Array.isArray(imported)) {
+                    const ids = new Set(animeList.map(a => a.id));
+                    let added = 0;
+                    imported.forEach(a => { if (a.id && !ids.has(a.id)) { animeList.push(a); ids.add(a.id); added++; } });
+                    saveList(FAVORITES_KEY, animeList);
+                    renderFavorites(getFilters());
+                    updateCounts();
+                    alert('成功导入 ' + added + ' 部番剧！');
+                }
+            } catch(err) { alert('导入失败：' + err.message); }
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+    });
+
+    // 计数
+    function updateCounts() {
+        document.getElementById('fav-count').textContent = animeList.length;
+        document.getElementById('watch-count').textContent = loadList(WATCHLIST_KEY).length;
+        // 更新 header 计数（显示当前 tab 的数量）
+        const activeTab = document.querySelector('.mylist-tab.active');
+        if (activeTab) {
+            const tabName = activeTab.dataset.tab;
+            document.getElementById('list-count').textContent = tabName === 'favorites' ? animeList.length : loadList(WATCHLIST_KEY).length;
+        }
+    }
+
+    // 初始化
+    renderFavorites(getFilters());
+    renderWatchlist(getWlFilters());
+    updateCounts();
+    </script>
+</body>
+</html>

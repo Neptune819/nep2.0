@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEP 番剧推荐系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='nep-theme.css') }}?v=3.0">
+    <style>
+        .landing {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            position: relative;
+            z-index: 1;
+        }
+        .landing-card {
+            max-width: 680px;
+            width: 100%;
+            background: var(--c-bg-card);
+            border: 1px solid var(--c-border);
+            border-radius: var(--radius-lg);
+            backdrop-filter: var(--blur);
+            overflow: hidden;
+        }
+        .landing-header {
+            text-align: center;
+            padding: 40px 32px 24px;
+        }
+        .landing-header h1 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #fff, var(--c-accent), var(--c-accent-2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+        .landing-header .tagline {
+            font-size: 14px;
+            color: var(--c-text-secondary);
+            letter-spacing: 2px;
+        }
+        .landing-body {
+            padding: 0 32px 32px;
+        }
+        .landing-section {
+            margin-bottom: 24px;
+        }
+        .landing-section h2 {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--c-text);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .landing-section h2 .num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--c-accent), var(--c-accent-2));
+            color: #fff;
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px 0;
+            font-size: 13.5px;
+            color: var(--c-text-secondary);
+            line-height: 1.6;
+            border-bottom: 1px solid var(--c-border);
+        }
+        .feature-list li:last-child { border-bottom: none; }
+        .feature-list .icon {
+            flex-shrink: 0;
+            width: 28px;
+            text-align: center;
+            font-size: 16px;
+        }
+        .feature-list .label {
+            color: var(--c-text);
+            font-weight: 500;
+            margin-right: 6px;
+        }
+        .purpose-box {
+            background: rgba(108, 140, 255, 0.06);
+            border: 1px solid rgba(108, 140, 255, 0.12);
+            border-radius: var(--radius);
+            padding: 16px 18px;
+            font-size: 13.5px;
+            color: var(--c-text-secondary);
+            line-height: 1.8;
+        }
+        .purpose-box strong { color: var(--c-text); }
+        .divider {
+            height: 1px;
+            background: var(--c-border);
+            margin: 20px 0;
+        }
+        .landing-footer {
+            padding: 0 32px 32px;
+            text-align: center;
+        }
+        .btn-enter {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 48px;
+            background: linear-gradient(135deg, var(--c-accent), var(--c-accent-2));
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-pill);
+            font-size: 16px;
+            font-weight: 600;
+            font-family: var(--font);
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 6px 24px var(--c-accent-glow);
+        }
+        .btn-enter:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 36px rgba(108, 140, 255, 0.4);
+            filter: brightness(1.1);
+        }
+        .landing-note {
+            font-size: 11px;
+            color: var(--c-text-muted);
+            margin-top: 12px;
+        }
+        .landing-stat {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin: 16px 0 8px;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-num {
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--c-accent);
+        }
+        .stat-label {
+            font-size: 11px;
+            color: var(--c-text-muted);
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-image" id="bg-image"></div>
+    <div class="bg-overlay"></div>
+    <div class="sakura-container" id="sakura-container"></div>
+    <script src="{{ url_for('static', filename='animematch-bg.js') }}?v=1.0"></script>
+
+    <div class="landing">
+        <div class="landing-card">
+            <div class="landing-header">
+                <h1>NEP 番剧推荐</h1>
+                <p class="tagline">基于番组数据与个人喜好的个性化推荐</p>
+                <div class="landing-stat">
+                    <div class="stat-item">
+                        <div class="stat-num">13,542</div>
+                        <div class="stat-label">精选番剧</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-num">5,961</div>
+                        <div class="stat-label">声优数据</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-num">419</div>
+                        <div class="stat-label">标签维度</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="landing-body">
+
+                <!-- 开发目的 -->
+                <div class="landing-section">
+                    <h2><span class="num">0</span> 开发目的</h2>
+                    <div class="purpose-box">
+                        <p>为什么做这个？</p>
+                        <p>主流平台的推荐算法往往偏向热门和商业推广，很难发现那些真正符合你口味但缺少曝光的番剧。</p>
+                        <p>NEP 的设计初衷是：从你的心理偏好出发——你喜欢什么样的故事、你的认知风格、情感需求——来预测你可能喜欢的作品，而不是简单地推荐"大多数人在看什么"。</p>
+                        <p>系统收录了 AniList 和 Bangumi 上的 13,000+ 部番剧数据，通过多维度因子分析，帮你找到那些被埋没的好作品。</p>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- 核心功能 -->
+                <div class="landing-section">
+                    <h2><span class="num">1</span> 核心推荐</h2>
+                    <ul class="feature-list">
+                        <li>
+                            <span class="icon">🎯</span>
+                            <div><span class="label">按番剧推荐</span>选一部你喜欢的番，系统会找出风格、标签、制作团队相似的作品。支持续集系列分离显示。</div>
+                        </li>
+                        <li>
+                            <span class="icon">📚</span>
+                            <div><span class="label">按看番历史</span>导入你的观看记录和评分，系统从全部历史中学习你的偏好，推荐你可能喜欢的新番。支持批量导入和文件导入。</div>
+                        </li>
+                        <li>
+                            <span class="icon">🏷️</span>
+                            <div><span class="label">按标签推荐</span>从 419 个标签中勾选你喜欢的类型（热血、恋爱、悬疑、治愈……），匹配推荐。</div>
+                        </li>
+                        <li>
+                            <span class="icon">📅</span>
+                            <div><span class="label">每日推荐</span>基于你的心理画像和偏好，每天推荐 100 部番剧，一周内不重复。分三种风格：探索型（偏冷门）、标准型、保守型（偏热门）。</div>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- 心理画像 -->
+                <div class="landing-section">
+                    <h2><span class="num">2</span> 心理画像</h2>
+                    <ul class="feature-list">
+                        <li>
+                            <span class="icon">🧠</span>
+                            <div><span class="label">性格测试</span>通过 20-60 道动漫相关题目，分析你的心理偏好（人格特质、叙事风格、世界观认同等），测试结果自动融入推荐算法。</div>
+                        </li>
+                        <li>
+                            <span class="icon">🎯</span>
+                            <div><span class="label">推荐风格</span>三种风格全局切换：探索型（偏向冷门佳作）、标准型（均衡推荐）、保守型（偏向热门经典）。</div>
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- 辅助功能 -->
+                <div class="landing-section">
+                    <h2><span class="num">3</span> 其他功能</h2>
+                    <ul class="feature-list">
+                        <li>
+                            <span class="icon">🎙️</span>
+                            <div><span class="label">声优搜索</span>搜索声优名称（支持中文别名），查看该声优配音的所有番剧。</div>
+                        </li>
+                        <li>
+                            <span class="icon">🔥</span>
+                            <div><span class="label">本季热门</span>查看当季热门和高分番剧，可按年份和季度筛选。</div>
+                        </li>
+                        <li>
+                            <span class="icon">📌</span>
+                            <div><span class="label">待看 &amp; 收藏</span>在任何页面点击番剧卡片，可加入待看列表或收藏列表。收藏列表支持打分，评分影响推荐。</div>
+                        </li>
+                        <li>
+                            <span class="icon">⚙️</span>
+                            <div><span class="label">调参</span>15 个推荐因子全部可调（低/中/高三档），自定义推荐偏好。</div>
+                        </li>
+                        <li>
+                            <span class="icon">🎵</span>
+                            <div><span class="label">BGM 播放器</span>上传本地音乐作为背景音乐，支持播放控制和自动下一首。</div>
+                        </li>
+                        <li>
+                            <span class="icon">🖼️</span>
+                            <div><span class="label">背景自定义</span>上传本地图片作为页面背景。</div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="landing-footer">
+                <button class="btn-enter" onclick="enterSite()">开始使用 →</button>
+                <p class="landing-note">数据来源：AniList + Bangumi · 仅供学习研究</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function enterSite() {
+        window.location.href = '/app';
+    }
+    </script>
+</body>
+</html>

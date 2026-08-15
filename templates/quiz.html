@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>心理画像问答 - 番剧推荐</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.8">
+    <link rel="stylesheet" href="{{ url_for('static', filename='nep-theme.css') }}?v=3.0">
+    <style>
+        .quiz-container {
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .quiz-header {
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .quiz-header h1 {
+            font-size: 36px;
+            background: linear-gradient(135deg, #a78bfa, #60a5fa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 12px;
+        }
+        .quiz-header p {
+            color: #94a3b8;
+            font-size: 16px;
+        }
+        .mode-selector {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 32px;
+            flex-wrap: nowrap;
+        }
+        .mode-selector .mode-card {
+            flex: 1;
+            max-width: 280px;
+            min-width: 200px;
+        }
+        .mode-card {
+            background: rgba(255,255,255,0.05);
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            width: 280px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+        .mode-card:hover {
+            border-color: rgba(139,92,246,0.5);
+            background: rgba(139,92,246,0.1);
+            transform: translateY(-4px);
+        }
+        .mode-card.selected {
+            border-color: #8b5cf6;
+            background: rgba(139,92,246,0.2);
+            box-shadow: 0 0 20px rgba(139,92,246,0.3);
+        }
+        .mode-card h3 {
+            color: #f1f5f9;
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+        .mode-card .mode-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+        .mode-card p {
+            color: #94a3b8;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        .mode-card .mode-time {
+            color: #8b5cf6;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .mode-card .mode-desc {
+            color: #94a3b8;
+            font-size: 13px;
+            text-align: left;
+            line-height: 1.8;
+        }
+        .progress-bar {
+            background: rgba(255,255,255,0.1);
+            border-radius: 999px;
+            height: 8px;
+            margin: 24px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            height: 100%;
+            border-radius: 999px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        .progress-text {
+            text-align: center;
+            color: #94a3b8;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+        .question-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .question-number {
+            color: #8b5cf6;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .question-text {
+            color: #f1f5f9;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            line-height: 1.4;
+        }
+        .options-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .option-btn {
+            background: rgba(255,255,255,0.05);
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 16px 20px;
+            color: #d1d5db;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+        .option-btn:hover {
+            background: rgba(139,92,246,0.1);
+            border-color: rgba(139,92,246,0.3);
+            color: #f1f5f9;
+        }
+        .option-btn.selected {
+            background: rgba(99,102,241,0.2);
+            border-color: #6366f1;
+            color: #f1f5f9;
+        }
+        .quiz-nav {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 24px;
+        }
+        .result-screen {
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .result-profile {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            margin: 24px 0;
+            text-align: left;
+        }
+        .result-profile h3 {
+            color: #f1f5f9;
+            margin-bottom: 16px;
+        }
+        .profile-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: #94a3b8;
+            font-size: 14px;
+        }
+        .profile-item .label {
+            color: #d1d5db;
+        }
+        .result-anime-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+            text-align: left;
+        }
+        .emoji-big {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        .restart-btn {
+            padding: 16px 48px;
+            font-size: 18px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            border: none;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 24px;
+        }
+        .restart-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(99,102,241,0.4);
+        }
+        .discovery-section {
+            margin-top: 40px;
+            text-align: left;
+        }
+        .discovery-section h3 {
+            color: #f1f5f9;
+            margin-bottom: 16px;
+        }
+        .discovery-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .discovery-tab {
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .discovery-tab.active {
+            background: rgba(139,92,246,0.2);
+            border-color: #8b5cf6;
+            color: #f1f5f9;
+        }
+    </style>
+</head>
+<body>
+    <!-- 背景图层 -->
+    <div class="bg-image" id="bg-image"></div>
+    <div class="bg-overlay"></div>
+    <div class="sakura-container" id="sakura-container"></div>
+
+    <!-- 背景图选择器 -->
+    <div id="bg-picker" class="bg-picker">
+        <button id="bg-toggle" class="bg-btn" title="切换背景">🖼️</button>
+        <div id="bg-panel" class="bg-panel">
+            <div class="bg-header">
+                <h3>🖼️ 背景图</h3>
+                <button id="bg-upload-btn" class="btn-secondary btn-small" style="padding:4px 10px;font-size:12px;">上传</button>
+                <input type="file" id="bg-file-input" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp" style="display:none">
+            </div>
+            <div id="bg-grid" class="bg-grid">
+                <div class="bg-empty">加载中…</div>
+            </div>
+            <div class="bg-actions">
+                <button id="bg-clear">🎨 用默认渐变</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='animematch-bg.js') }}?v=1.0"></script>
+
+    <!-- 左上角模式切换下拉菜单（全局，由 style_selector.js 驱动） -->
+    <div id="style-dropdown" class="style-dropdown">
+        <button id="style-toggle" class="style-toggle" title="切换推荐风格">
+            <span id="style-icon">⚖️</span>
+            <span id="style-name">标准型</span>
+            <span class="style-arrow">▼</span>
+        </button>
+        <div id="style-menu" class="style-menu" style="display:none">
+            <div class="style-menu-item" data-style="explore">
+                <span>🔭</span> 探索型
+            </div>
+            <div class="style-menu-item active" data-style="standard">
+                <span>⚖️</span> 标准型
+            </div>
+            <div class="style-menu-item" data-style="conservative">
+                <span>🎯</span> 保守型
+            </div>
+        </div>
+    </div>
+
+    <div class="quiz-container">
+        <!-- 模式选择界面 -->
+        <div id="style-screen" class="quiz-header">
+            <div class="emoji-big">🎬</div>
+            <h1>选择推荐风格</h1>
+            <p>选择你希望的推荐方式，之后可以随时在左上角切换</p>
+            
+            <div class="mode-selector" style="margin-top: 40px;">
+                <div class="mode-card" onclick="confirmStyle('explore')" id="style-explore">
+                    <div class="mode-icon">🔭</div>
+                    <h3>探索型</h3>
+                    <p>发散你的喜好，发现更多可能喜欢的番剧</p>
+                    <div class="mode-desc">
+                        <div>• 更多小众高分佳作</div>
+                        <div>• 口味盲区探索</div>
+                        <div>• 适合想要拓展视野的用户</div>
+                    </div>
+                </div>
+                <div class="mode-card" onclick="confirmStyle('standard')" id="style-standard">
+                    <div class="mode-icon">⚖️</div>
+                    <h3>标准型</h3>
+                    <p>平衡推荐，兼顾热门与冷门</p>
+                    <div class="mode-desc">
+                        <div>• 均衡的推荐比例</div>
+                        <div>• 热门与冷门兼顾</div>
+                        <div>• 适合大多数用户</div>
+                    </div>
+                </div>
+                <div class="mode-card" onclick="confirmStyle('conservative')" id="style-conservative">
+                    <div class="mode-icon">🎯</div>
+                    <h3>保守型</h3>
+                    <p>推荐符合你性格的热门高分番剧</p>
+                    <div class="mode-desc">
+                        <div>• 热门经典作品为主</div>
+                        <div>• 高匹配度推荐</div>
+                        <div>• 适合偏好稳定的用户</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 开始界面（测试深度选择） -->
+        <div id="start-screen" class="quiz-header" style="display:none">
+            <div class="emoji-big">🧠</div>
+            <h1>心理画像测试</h1>
+            <p>通过问答了解你的心理偏好，生成专属推荐</p>
+            <p style="color: #64748b; font-size: 14px; margin-top: 8px;">
+                基于24维度心理画像，从13,000+部番剧中精准匹配
+            </p>
+            
+            <!-- 测试深度选择 -->
+            <h3 style="color: #d1d5db; margin-top: 40px; margin-bottom: 16px;">选择测试深度</h3>
+            <div class="mode-selector">
+                <div class="mode-card" onclick="selectMode('simple')">
+                    <div class="mode-icon">⚡</div>
+                    <h3>简易版</h3>
+                    <p>20道精选题目，快速了解你的基础偏好</p>
+                    <div class="mode-time">⏱ 约2-3分钟</div>
+                </div>
+                <div class="mode-card" onclick="selectMode('complex')">
+                    <div class="mode-icon">🔬</div>
+                    <h3>深度版</h3>
+                    <p>60道深度题目，全面分析你的心理画像</p>
+                    <div class="mode-time">⏱ 约8-10分钟</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 问答界面 -->
+        <div id="quiz-screen" style="display:none">
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            <div id="progress-text" class="progress-text">问题 1 / 20</div>
+            
+            <div id="question-container" class="question-card">
+                <!-- 问题内容由JS动态生成 -->
+            </div>
+            
+            <div class="quiz-nav">
+                <button id="btn-prev" class="btn-secondary" onclick="prevQuestion()" style="visibility:hidden">← 上一题</button>
+                <button id="btn-next" class="btn-primary" onclick="nextQuestion()" style="visibility:hidden">下一题 →</button>
+            </div>
+        </div>
+
+        <!-- 结果界面 -->
+        <div id="result-screen" class="result-screen" style="display:none">
+            <div class="emoji-big">🎯</div>
+            <h2 style="color: #f1f5f9; margin-bottom: 8px;">你的心理画像</h2>
+            <p style="color: #94a3b8;">基于你的回答，我们为你生成了专属画像</p>
+            
+            <div id="result-profile" class="result-profile">
+                <!-- 画像内容由JS动态生成 -->
+            </div>
+            
+            <div class="discovery-section">
+                <h3>🔍 为你推荐的番剧</h3>
+                <div class="discovery-tabs">
+                    <button class="discovery-tab active" onclick="showDiscoveryTab('all')">全部</button>
+                    <button class="discovery-tab" onclick="showDiscoveryTab('underrated')">被低估佳作</button>
+                    <button class="discovery-tab" onclick="showDiscoveryTab('vintage')">经典老番</button>
+                    <button class="discovery-tab" onclick="showDiscoveryTab('blind_spot')">口味盲区</button>
+                </div>
+                <div id="result-anime" class="result-anime-grid">
+                    <!-- 推荐结果由JS动态生成 -->
+                </div>
+                <div style="text-align: center; margin-top: 16px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                    <button class="btn-secondary" onclick="refreshRecommendations()" id="btn-refresh">🔄 换一批</button>
+                    <div class="export-dropdown">
+                        <button id="btn-quiz-export" class="btn-secondary">📥 导出 ▾</button>
+                        <div id="quiz-export-menu" class="export-menu">
+                            <button data-fmt="docx">📄 Word 文档</button>
+                            <button data-fmt="image">🖼️ 封面海报</button>
+                            <button data-fmt="txt">📝 文本列表</button>
+                            <button data-fmt="csv">📊 CSV 表格</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <button class="restart-btn" onclick="restartQuiz()" style="margin-top: 32px;">重新测试</button>
+            <a href="/app" class="btn-secondary" style="display: inline-block; margin-top: 16px; text-decoration: none;">
+                返回首页
+            </a>
+        </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div id="anime-detail-overlay" class="detail-overlay">
+        <div class="detail-modal">
+            <button class="detail-close" title="关闭">&times;</button>
+            <div class="detail-scroll">
+                <!-- 头部：封面 + 基本信息 -->
+                <div class="detail-header">
+                    <div class="detail-cover">
+                        <img id="detail-cover-img" src="" alt="">
+                    </div>
+                    <div class="detail-meta">
+                        <h2 id="detail-title"></h2>
+                        <div id="detail-original-title" class="detail-original-name"></div>
+                        <div class="detail-stats" id="detail-stats"></div>
+                        <div class="detail-tags" id="detail-tags"></div>
+                    </div>
+                </div>
+
+                <!-- 简介 -->
+                <div class="detail-section" id="detail-summary-section">
+                    <h3>📖 简介</h3>
+                    <p id="detail-summary"></p>
+                </div>
+
+                <!-- 制作信息 -->
+                <div class="detail-section" id="detail-info-section">
+                    <h3>📋 制作信息</h3>
+                    <div id="detail-info"></div>
+                </div>
+
+                <!-- 声优 -->
+                <div class="detail-section" id="detail-va-section">
+                    <h3>🎤 声优阵容</h3>
+                    <div id="detail-va"></div>
+                </div>
+
+                <!-- 续集 -->
+                <div class="detail-section" id="detail-sequels-section" style="display:none">
+                    <h3>📺 续集系列</h3>
+                    <div id="detail-sequels" class="detail-card-row"></div>
+                </div>
+
+                <!-- 相似推荐 -->
+                <div class="detail-section" id="detail-similar-section">
+                    <h3>🎯 相似番剧</h3>
+                    <div id="detail-similar" class="detail-card-row"></div>
+                </div>
+            </div>
+            <div class="detail-footer">
+                <button id="detail-btn-recommend" class="btn-primary">🎯 以此为种子推荐</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='style_selector.js') }}?v=1.0"></script>
+    <script src="{{ url_for('static', filename='detail.js') }}?v=1.6"></script>
+    <script>
+    // 状态
+    let currentMode = null;
+    // currentStyle 由 style_selector.js 提供（带 localStorage 持久化）
+    let questions = [];
+    let currentQuestion = 0;
+    let answers = [];
+    let quizResult = null;
+    let currentDiscoveryTab = 'all';
+    let shownAnimeIds = new Set();  // 已展示的番剧ID，用于去重
+
+    // quiz 页面：响应全局风格切换，重置测试状态
+    function onStyleChangedForQuiz(style) {
+        // 同步卡片选中态
+        document.querySelectorAll('[id^="style-"]').forEach(el => el.classList.remove('selected'));
+        const card = document.getElementById('style-' + style);
+        if (card) card.classList.add('selected');
+
+        // 如果已经在测试中，重置测试状态
+        if (currentMode && questions.length > 0) {
+            currentMode = null;
+            questions = [];
+            currentQuestion = 0;
+            answers = [];
+            quizResult = null;
+            shownAnimeIds = new Set();
+
+            // 回到测试深度选择页面
+            document.getElementById('quiz-screen').style.display = 'none';
+            document.getElementById('result-screen').style.display = 'none';
+            document.getElementById('style-screen').style.display = 'none';
+            document.getElementById('start-screen').style.display = 'block';
+        }
+    }
+
+    // 确认选择风格并进入测试（卡片点击）
+    function confirmStyle(style) {
+        if (typeof switchStyle === 'function') {
+            switchStyle(style);
+        } else {
+            currentStyle = style;
+        }
+        updateStyleIndicator();
+        // 切换到测试深度选择页面
+        document.getElementById('style-screen').style.display = 'none';
+        document.getElementById('start-screen').style.display = 'block';
+    }
+
+    // 选择推荐风格（在选择页面点击卡片）
+    function selectStyle(style) {
+        if (typeof switchStyle === 'function') {
+            switchStyle(style);
+        } else {
+            currentStyle = style;
+        }
+        // 更新UI选中状态
+        document.querySelectorAll('[id^="style-"]').forEach(el => el.classList.remove('selected'));
+        const card = document.getElementById('style-' + style);
+        if (card) card.classList.add('selected');
+    }
+
+    // 选择模式
+    async function selectMode(mode) {
+        currentMode = mode;
+        
+        // 从后端获取题目
+        try {
+            const r = await fetch(`/api/quiz/questions?mode=${mode}`);
+            const data = await r.json();
+            questions = data.questions;
+            
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('quiz-screen').style.display = 'block';
+            currentQuestion = 0;
+            answers = new Array(questions.length).fill(null);
+            showQuestion();
+        } catch (e) {
+            alert('获取题目失败，请重试');
+        }
+    }
+
+    // 显示问题
+    function showQuestion() {
+        const q = questions[currentQuestion];
+        const container = document.getElementById('question-container');
+        
+        let optionsHtml = '';
+        if (q.type === 'single') {
+            optionsHtml = q.options.map((opt, i) => `
+                <button class="option-btn ${answers[currentQuestion] === i ? 'selected' : ''}" 
+                        onclick="selectOption(${i})">
+                    ${opt.text}
+                </button>
+            `).join('');
+        } else if (q.type === 'scale') {
+            optionsHtml = [1,2,3,4,5].map(v => `
+                <button class="option-btn ${answers[currentQuestion] === v ? 'selected' : ''}" 
+                        onclick="selectOption(${v})">
+                    ${v} - ${v === 1 ? '非常不同意' : v === 2 ? '不同意' : v === 3 ? '一般' : v === 4 ? '同意' : '非常同意'}
+                </button>
+            `).join('');
+        }
+        
+        container.innerHTML = `
+            <div class="question-number">问题 ${currentQuestion + 1} / ${questions.length}</div>
+            <div class="question-text">${q.question}</div>
+            <div class="options-list">
+                ${optionsHtml}
+            </div>
+        `;
+
+        // 更新进度条
+        const progress = ((currentQuestion + 1) / questions.length) * 100;
+        document.getElementById('progress-fill').style.width = progress + '%';
+        document.getElementById('progress-text').textContent = `问题 ${currentQuestion + 1} / ${questions.length}`;
+
+        // 更新导航按钮
+        document.getElementById('btn-prev').style.visibility = currentQuestion > 0 ? 'visible' : 'hidden';
+        document.getElementById('btn-next').style.visibility = answers[currentQuestion] !== null ? 'visible' : 'hidden';
+        document.getElementById('btn-next').textContent = currentQuestion === questions.length - 1 ? '查看结果 →' : '下一题 →';
+    }
+
+    // 选择选项（点击后自动跳转下一题）
+    function selectOption(value) {
+        answers[currentQuestion] = value;
+        
+        // 延迟一小段时间后自动跳转，让用户看到选中效果
+        setTimeout(() => {
+            if (currentQuestion < questions.length - 1) {
+                currentQuestion++;
+                showQuestion();
+            } else {
+                showResult();
+            }
+        }, 200);
+    }
+
+    // 上一题
+    function prevQuestion() {
+        if (currentQuestion > 0) {
+            currentQuestion--;
+            showQuestion();
+        }
+    }
+
+    // 下一题
+    async function nextQuestion() {
+        if (answers[currentQuestion] === null) return;
+        
+        if (currentQuestion < questions.length - 1) {
+            currentQuestion++;
+            showQuestion();
+        } else {
+            await showResult();
+        }
+    }
+
+    // 显示结果
+    async function showResult() {
+        // 构建答案数据
+        const answersData = questions.map((q, i) => ({
+            question_id: q.id,
+            answer: answers[i]
+        }));
+        
+        try {
+            const r = await fetch('/api/quiz/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mode: currentMode,
+                    style: currentStyle,
+                    answers: answersData
+                })
+            });
+            quizResult = await r.json();
+            
+            document.getElementById('quiz-screen').style.display = 'none';
+            document.getElementById('result-screen').style.display = 'block';
+
+            // 显示用户画像
+            renderProfile(quizResult);
+            
+            // 显示推荐结果
+            renderDiscoveryResults('all');
+
+            // 加载每日推荐
+            loadDailyRecommend();
+        } catch (e) {
+            alert('获取结果失败，请重试');
+        }
+    }
+
+    // 加载每日推荐
+    async function loadDailyRecommend() {
+        const loadingDiv = document.getElementById('daily-recommend-loading');
+        const gridDiv = document.getElementById('daily-recommend-grid');
+        const dateDiv = document.getElementById('daily-recommend-date');
+
+        try {
+            const r = await fetch('/api/daily-recommend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    profile: quizResult.profile,
+                    style: currentStyle
+                })
+            });
+            const data = await r.json();
+
+            loadingDiv.style.display = 'none';
+            gridDiv.style.display = 'grid';
+
+            // 渲染每日推荐结果
+            const allResults = [
+                ...(data.recommendations?.underrated || []),
+                ...(data.recommendations?.vintage || []),
+                ...(data.recommendations?.blind_spot || [])
+            ];
+
+            // 记录已展示的ID
+            allResults.forEach(a => shownAnimeIds.add(a.id));
+
+            gridDiv.innerHTML = allResults.slice(0, 100).map(a => `
+                <div class="anime-card" data-id="${a.id}" onclick="openAnimeDetail(${a.id})">
+                    <img class="image" src="${escapeHtml(a.image)}" loading="lazy"
+                         onerror="this.style.background='#374151'; this.removeAttribute('src')">
+                    <div class="body">
+                        <div class="title">${escapeHtml(a.name_cn || a.name)}</div>
+                        <div class="meta">
+                            ${a.rating ? `<span class="rating-badge">⭐ ${a.rating}</span>` : ''}
+                        </div>
+                        ${a.reason ? `<div class="reasons"><span class="reason">${escapeHtml(a.reason)}</span></div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            dateDiv.textContent = `📅 ${data.date} | 共 ${data.total} 部 | ${styleConfig[currentStyle].name}模式`;
+        } catch (e) {
+            loadingDiv.textContent = '加载每日推荐失败，请刷新重试';
+            console.error('加载每日推荐失败:', e);
+        }
+    }
+
+    // 渲染画像
+    function renderProfile(result) {
+        const profileDiv = document.getElementById('result-profile');
+        const profile = result.profile || {};
+        const personality = profile.personality || {};
+        const needs = profile.needs || {};
+        const emotion = profile.emotion || {};
+        const narrative = profile.narrative || {};
+        
+        profileDiv.innerHTML = `
+            <h3>📊 你的心理画像</h3>
+            ${result.reasoning ? `<div style="color: #d1d5db; margin-bottom: 16px; line-height: 1.6;">${escapeHtml(result.reasoning)}</div>` : ''}
+            <div class="profile-item">
+                <span class="label">主导原型</span>
+                <span>${getArchetypeName(narrative.archetype)}</span>
+            </div>
+            <div class="profile-item">
+                <span class="label">MBTI倾向</span>
+                <span>${personality.mbti || '未知'}</span>
+            </div>
+            <div class="profile-item">
+                <span class="label">核心需求</span>
+                <span>${getNeedName(needs.sdt_needs)}</span>
+            </div>
+            <div class="profile-item">
+                <span class="label">调节焦点</span>
+                <span>${needs.regulatory_focus === 'promotion' ? '进取型' : '防御型'}</span>
+            </div>
+            <div class="profile-item">
+                <span class="label">依恋类型</span>
+                <span>${getAttachmentName(emotion.attachment)}</span>
+            </div>
+            <div class="profile-item">
+                <span class="label">叙事偏好</span>
+                <span>${getNarrativeName(narrative.narrative_type)}</span>
+            </div>
+            ${result.tags && result.tags.length > 0 ? `
+            <div class="profile-item">
+                <span class="label">推荐标签</span>
+                <span>${result.tags.slice(0, 5).join('、')}</span>
+            </div>
+            ` : ''}
+        `;
+    }
+
+    // 渲染发现型推荐结果
+    function renderDiscoveryResults(tab) {
+        currentDiscoveryTab = tab;
+        
+        // 更新tab样式
+        document.querySelectorAll('.discovery-tab').forEach(t => {
+            t.classList.remove('active');
+            if (t.textContent.includes(tab === 'all' ? '全部' : 
+                tab === 'underrated' ? '被低估' : 
+                tab === 'vintage' ? '经典' : '盲区')) {
+                t.classList.add('active');
+            }
+        });
+        
+        const resultDiv = document.getElementById('result-anime');
+        let results = [];
+        
+        if (tab === 'all') {
+            results = [
+                ...(quizResult.recommendations?.underrated || []),
+                ...(quizResult.recommendations?.vintage || []),
+                ...(quizResult.recommendations?.blind_spot || [])
+            ];
+        } else {
+            results = quizResult.recommendations?.[tab] || [];
+        }
+        
+        if (results.length === 0) {
+            resultDiv.innerHTML = '<p style="color: #94a3b8;">暂无推荐</p>';
+            return;
+        }
+        
+        // 记录已展示的番剧ID
+        results.forEach(a => shownAnimeIds.add(a.id));
+        
+        resultDiv.innerHTML = results.map(a => `
+            <div class="anime-card" data-id="${a.id}" onclick="openAnimeDetail(${a.id})">
+                <img class="image" src="${escapeHtml(a.image)}" loading="lazy"
+                     onerror="this.style.background='#374151'; this.removeAttribute('src')">
+                <div class="body">
+                    <div class="title">${escapeHtml(a.name_cn || a.name)}</div>
+                    <div class="meta">
+                        ${a.rating ? `<span class="rating-badge">⭐ ${a.rating}</span>` : ''}
+                    </div>
+                    ${a.reason ? `<div class="reasons"><span class="reason">${escapeHtml(a.reason)}</span></div>` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // 显示发现型推荐tab
+    function showDiscoveryTab(tab) {
+        renderDiscoveryResults(tab);
+    }
+
+    // 刷新推荐结果
+    async function refreshRecommendations() {
+        const btn = document.getElementById('btn-refresh');
+        btn.disabled = true;
+        btn.textContent = '加载中...';
+        
+        try {
+            // 重新调用API获取新的推荐，传入已展示的ID避免重复
+            const r = await fetch('/api/quiz/recommend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    profile: quizResult.profile,
+                    style: currentStyle,
+                    limit: 50,
+                    exclude_ids: Array.from(shownAnimeIds)
+                })
+            });
+            const newRecommendations = await r.json();
+            
+            // 更新推荐结果
+            quizResult.recommendations = {
+                underrated: newRecommendations.underrated || [],
+                vintage: newRecommendations.vintage || [],
+                blind_spot: newRecommendations.blind_spot || []
+            };
+            
+            // 重新渲染当前tab
+            renderDiscoveryResults(currentDiscoveryTab);
+        } catch (e) {
+            console.error('刷新失败:', e);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 换一批';
+        }
+    }
+
+    // 获取原型名称
+    function getArchetypeName(archetype) {
+        const names = {
+            'hero': '英雄', 'sage': '智者', 'explorer': '探索者',
+            'outlaw': '叛逆者', 'magician': '魔法师', 'caregiver': '照顾者',
+            'lover': '情人', 'jester': '弄臣', 'orphan': '孤儿',
+            'creator': '创造者', 'ruler': '统治者', 'innocent': '天真者',
+            'everyman': '普通人', 'seeker': '追寻者', 'destroyer': '毁灭者'
+        };
+        return names[archetype] || archetype || '未知';
+    }
+
+    // 获取需求名称
+    function getNeedName(sdt) {
+        if (!sdt) return '未知';
+        const max = Object.entries(sdt).reduce((a, b) => a[1] > b[1] ? a : b);
+        const names = { 'autonomy': '自主', 'competence': '能力', 'relatedness': '关系' };
+        return names[max[0]] || '未知';
+    }
+
+    // 获取依恋类型名称
+    function getAttachmentName(attachment) {
+        const names = {
+            'secure': '安全型', 'anxious_preoccupied': '焦虑型',
+            'dismissive_avoidant': '回避型', 'fearful_avoidant': '恐惧型'
+        };
+        return names[attachment] || attachment || '未知';
+    }
+
+    // 获取叙事类型名称
+    function getNarrativeName(narrative) {
+        const names = {
+            'progressive': '进步叙事', 'redemption': '救赎叙事',
+            'exploration': '探索叙事', 'stability': '稳定叙事',
+            'contamination': '悲剧叙事', 'regressive': '怀旧叙事'
+        };
+        return names[narrative] || narrative || '未知';
+    }
+
+    // 重新测试
+    function restartQuiz() {
+        document.getElementById('result-screen').style.display = 'none';
+        document.getElementById('quiz-screen').style.display = 'none';
+        document.getElementById('style-screen').style.display = 'none';
+        document.getElementById('start-screen').style.display = 'block';
+        currentMode = null;
+        questions = [];
+        currentQuestion = 0;
+        answers = [];
+        quizResult = null;
+        shownAnimeIds = new Set();
+    }
+
+    // HTML转义
+    function escapeHtml(s) {
+        if (!s) return '';
+        return String(s).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    // 问答结果导出
+    const quizExportBtn = document.getElementById('btn-quiz-export');
+    const quizExportMenu = document.getElementById('quiz-export-menu');
+    if (quizExportBtn && quizExportMenu) {
+        quizExportBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            quizExportMenu.style.display = quizExportMenu.style.display === 'block' ? 'none' : 'block';
+        });
+        document.addEventListener('click', () => {
+            quizExportMenu.style.display = 'none';
+        });
+        quizExportMenu.querySelectorAll('button[data-fmt]').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                quizExportMenu.style.display = 'none';
+                if (!quizResult || !quizResult.recommendations) {
+                    alert('请先完成测试并获取推荐');
+                    return;
+                }
+                const allResults = [
+                    ...(quizResult.recommendations.underrated || []),
+                    ...(quizResult.recommendations.vintage || []),
+                    ...(quizResult.recommendations.blind_spot || [])
+                ];
+                if (allResults.length === 0) {
+                    alert('没有可导出的推荐结果');
+                    return;
+                }
+                const fmt = btn.dataset.fmt;
+                const origText = btn.textContent;
+                btn.textContent = '导出中...';
+                btn.disabled = true;
+                try {
+                    const r = await fetch('/api/export', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({list: allResults, format: fmt}),
+                    });
+                    if (!r.ok) {
+                        const err = await r.json().catch(() => ({}));
+                        alert('导出失败: ' + (err.error || r.status));
+                        return;
+                    }
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `quiz_recommend.${fmt === 'image' ? 'jpg' : fmt}`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } catch (err) {
+                    alert('导出失败: ' + err.message);
+                } finally {
+                    btn.textContent = origText;
+                    btn.disabled = false;
+                }
+            });
+        });
+    }
+    </script>
+</body>
+</html>

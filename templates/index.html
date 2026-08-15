@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>番剧推荐 · NEP v3.0</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=1.6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='nep-theme.css') }}?v=3.0">
+</head>
+<body>
+    <!-- 背景图层（由 animematch-bg.js 控制） -->
+    <div class="bg-image" id="bg-image"></div>
+    <div class="bg-overlay"></div>
+    <div class="sakura-container" id="sakura-container"></div>
+
+    <!-- 音乐播放器 -->
+    <div id="bgm-player" class="bgm-player">
+        <button id="bgm-toggle" class="bgm-btn" title="音乐播放器">🎵</button>
+        <div id="bgm-panel" class="bgm-panel" style="display:none">
+            <div class="bgm-header">
+                <h3>🎶 背景音乐</h3>
+                <button id="bgm-upload-btn" class="btn-secondary btn-small">上传音乐</button>
+                <input type="file" id="bgm-file-input" accept=".mp3,.wav,.ogg,.m4a" style="display:none">
+            </div>
+            <div id="bgm-track-list" class="bgm-track-list">
+                <div class="loading">加载中...</div>
+            </div>
+            <div class="bgm-controls">
+                <button id="bgm-prev" class="bgm-ctrl-btn" title="上一首">⏮</button>
+                <button id="bgm-play" class="bgm-ctrl-btn bgm-play-btn" title="播放/暂停">▶</button>
+                <button id="bgm-next" class="bgm-ctrl-btn" title="下一首">⏭</button>
+                <div class="bgm-volume-wrap">
+                    <span>🔊</span>
+                    <input type="range" id="bgm-volume" min="0" max="100" value="50" class="bgm-volume">
+                </div>
+            </div>
+            <div id="bgm-now-playing" class="bgm-now-playing">未选择音乐</div>
+        </div>
+    </div>
+
+    <!-- 背景图选择器 -->
+    <div id="bg-picker" class="bg-picker">
+        <button id="bg-toggle" class="bg-btn" title="切换背景">🖼️</button>
+        <div id="bg-panel" class="bg-panel">
+            <div class="bg-header">
+                <h3>🖼️ 背景图</h3>
+                <button id="bg-upload-btn" class="btn-secondary btn-small" style="padding:4px 10px;font-size:12px;">上传</button>
+                <input type="file" id="bg-file-input" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp" style="display:none">
+            </div>
+            <div id="bg-grid" class="bg-grid">
+                <div class="bg-empty">加载中…</div>
+            </div>
+            <div class="bg-actions">
+                <button id="bg-clear">🎨 用默认渐变</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='animematch-bg.js') }}?v=1.0"></script>
+
+    <!-- 左上角推荐风格下拉菜单（全局） -->
+    <div id="style-dropdown" class="style-dropdown">
+        <button id="style-toggle" class="style-toggle" title="切换推荐风格">
+            <span id="style-icon">⚖️</span>
+            <span id="style-name">标准型</span>
+            <span class="style-arrow">▼</span>
+        </button>
+        <div id="style-menu" class="style-menu" style="display:none">
+            <div class="style-menu-item" data-style="explore">
+                <span>🔭</span> 探索型
+            </div>
+            <div class="style-menu-item active" data-style="standard">
+                <span>⚖️</span> 标准型
+            </div>
+            <div class="style-menu-item" data-style="conservative">
+                <span>🎯</span> 保守型
+            </div>
+        </div>
+    </div>
+
+    <header>
+        <h1>✨ 番剧推荐 ✨</h1>
+        <p class="subtitle">基于番组数据与个人喜好的个性化推荐</p>
+    </header>
+
+    <nav class="tabs">
+        <a href="/quiz" class="tab" style="text-decoration:none; background: linear-gradient(135deg, #f59e0b, #ef4444); color: white;">🎯 性格测试</a>
+        <button class="tab active" data-tab="anime">🎯 按番剧</button>
+        <button class="tab" data-tab="history">📚 按看番历史</button>
+        <button class="tab" data-tab="tags">🏷️ 按标签</button>
+        <button class="tab" data-tab="va">🎙️ 按声优</button>
+        <button class="tab" data-tab="trending">🔥 本季热门</button>
+        <button class="tab" data-tab="daily">📅 每日推荐</button>
+        <button class="tab" data-tab="settings">⚙️ 调参</button>
+    </nav>
+
+    <main>
+        <!-- ========== Tab 1: 按番剧 ========== -->
+        <section id="tab-anime" class="tab-content active">
+            <h2>找一部你喜欢的番剧，推荐相似的</h2>
+            <div class="search-box">
+                <input type="text" id="search-anime" placeholder="输入番剧名（如：进击的巨人 / Cowboy Bebop / 命运石之门）" autocomplete="off">
+                <div id="search-results" class="search-results"></div>
+            </div>
+            <div id="sequels-row" class="sequel-row" style="display:none">
+                <h3 class="sequel-title">📺 续集系列</h3>
+                <div id="results-sequels" class="sequel-cards"></div>
+            </div>
+            <div id="results-anime" class="results"></div>
+            <div id="load-more-anime" class="load-more-wrap" style="display:none">
+                <button class="btn-secondary load-more-btn">加载更多 ↓</button>
+            </div>
+        </section>
+
+        <!-- ========== Tab 2: 按历史 ========== -->
+        <section id="tab-history" class="tab-content">
+            <h2>列出你看过的番 + 评分，推荐你会喜欢的</h2>
+            <div class="search-box">
+                <input type="text" id="search-history" placeholder="搜索你想加入的番剧..." autocomplete="off">
+                <div id="history-search-results" class="search-results"></div>
+            </div>
+            <div class="history-actions">
+                <a href="/mylist" class="btn-secondary" style="text-decoration:none">📚 我的列表</a>
+                <button id="btn-batch-import" class="btn-secondary">📋 批量导入</button>
+                <button id="btn-file-import" class="btn-secondary">📁 导入文件</button>
+                <div class="export-dropdown">
+                    <button id="btn-export-menu" class="btn-secondary">📥 导出 ▾</button>
+                    <div id="export-menu" class="export-menu">
+                        <button data-fmt="docx">📄 Word 文档</button>
+                        <button data-fmt="image">🖼️ 封面海报</button>
+                        <button data-fmt="txt">📝 文本列表</button>
+                        <button data-fmt="csv">📊 CSV 表格</button>
+                    </div>
+                </div>
+                <button id="btn-recommend-history" class="btn-primary" disabled>📚 推荐</button>
+                <button id="btn-clear-history" class="btn-secondary">清空</button>
+            </div>
+            <!-- 批量导入面板 -->
+            <div id="batch-import-panel" class="batch-import-panel" style="display:none">
+                <h3>📋 批量导入追番历史</h3>
+                <p class="hint">支持以下格式（每行一个，自动识别）：</p>
+                <ul class="hint-list">
+                    <li>进击的巨人</li>
+                    <li>1. 进击的巨人 8分</li>
+                    <li>【看过】命运石之门</li>
+                    <li>无职转生 / Mushoku Tensei</li>
+                </ul>
+                <textarea id="batch-import-text" placeholder="粘贴你的追番列表到这里...&#10;&#10;示例：&#10;进击的巨人&#10;命运石之门&#10;无职转生&#10;Re:从零开始的异世界生活"></textarea>
+                <div class="batch-import-actions">
+                    <button id="btn-parse-batch" class="btn-primary">🔍 解析</button>
+                    <button id="btn-cancel-batch" class="btn-secondary">取消</button>
+                </div>
+                <div id="batch-parse-result" class="batch-parse-result" style="display:none"></div>
+            </div>
+            <!-- 文件导入面板 -->
+            <div id="file-import-panel" class="batch-import-panel" style="display:none">
+                <h3>📁 从文件导入</h3>
+                <p class="hint">支持以下格式：</p>
+                <ul class="hint-list">
+                    <li>📝 Word文档（DOCX）</li>
+                    <li>📕 PDF文档</li>
+                    <li>📃 纯文本（TXT/MD/CSV）</li>
+                </ul>
+                <div class="file-upload-area" id="file-upload-area">
+                    <input type="file" id="file-input" accept=".docx,.doc,.pdf,.txt,.md,.csv" style="display:none">
+                    <div class="file-upload-placeholder">
+                        <span class="upload-icon">📤</span>
+                        <p>点击或拖拽文件到这里</p>
+                        <p class="hint">最大 10MB</p>
+                    </div>
+                </div>
+                <div id="file-upload-info" class="file-upload-info" style="display:none">
+                    <span id="file-name"></span>
+                    <button id="btn-clear-file" class="btn-secondary btn-small">✕</button>
+                </div>
+                <div class="batch-import-actions">
+                    <button id="btn-parse-file" class="btn-primary" disabled>🔍 解析文件</button>
+                    <button id="btn-cancel-file" class="btn-secondary">取消</button>
+                </div>
+                <div id="file-parse-result" class="batch-parse-result" style="display:none"></div>
+            </div>
+            <div class="history-list-header">
+                <h3>你的番剧列表 <span class="hint">（1-10 分，5 分以下是不喜欢）</span></h3>
+            </div>
+            <ul id="history-list" class="history-list"></ul>
+            <div id="results-history" class="results"></div>
+            <div id="load-more-history" class="load-more-wrap" style="display:none">
+                <button class="btn-secondary load-more-btn">加载更多 ↓</button>
+            </div>
+        </section>
+
+        <!-- ========== Tab 3: 按标签 ========== -->
+        <section id="tab-tags" class="tab-content">
+            <h2>勾选你喜欢的标签</h2>
+            <div id="tag-cloud" class="tag-cloud">
+                <p class="loading">加载标签中...</p>
+            </div>
+            <div class="actions">
+                <button id="btn-clear-tags" class="btn-secondary">清空</button>
+                <button id="btn-recommend-tags" class="btn-primary" disabled>🏷️ 推荐</button>
+            </div>
+            <div id="results-tags" class="results"></div>
+            <div id="load-more-tags" class="load-more-wrap" style="display:none">
+                <button class="btn-secondary load-more-btn">加载更多 ↓</button>
+            </div>
+        </section>
+
+        <!-- ========== Tab 4: 按声优 (v1.2) ========== -->
+        <section id="tab-va" class="tab-content">
+            <h2>搜声优 → 列出该声优配过的所有番剧</h2>
+            <p class="hint">支持中文别名（如「花泽香菜」「神谷浩史」）或罗马字（"Hanazawa"）</p>
+            <div class="search-box">
+                <input type="text" id="search-va" placeholder="输入声优名..." autocomplete="off">
+                <div id="va-search-results" class="search-results"></div>
+            </div>
+            <div id="va-detail" class="va-detail" style="display:none">
+                <h3>该声优配过的番剧（按热度排）<span id="va-count" class="hint"></span></h3>
+                <div id="results-va" class="results"></div>
+            </div>
+        </section>
+
+        <!-- ========== Tab 5: 本季热门 ========== -->
+        <section id="tab-trending" class="tab-content">
+            <h2>本季度热门 + 高分番剧</h2>
+            <p class="hint">综合考虑均分、人气、收藏数；按 consensus 排序。未开播季自动按热度排</p>
+            <div class="trending-filters">
+                <label><input type="checkbox" id="chk-current-year"> 仅 2026</label>
+                <label><input type="checkbox" id="chk-fall-2026"> 仅 FALL 2026</label>
+            </div>
+            <div id="results-trending" class="results"></div>
+            <div id="load-more-trending" class="load-more-wrap" style="display:none">
+                <button class="btn-secondary load-more-btn">加载更多 ↓</button>
+            </div>
+        </section>
+
+        <!-- ========== Tab 6: 每日推荐 ========== -->
+        <section id="tab-daily" class="tab-content">
+            <h2>📅 每日推荐</h2>
+            <p class="hint">基于你的心理画像和推荐风格，每天推荐100部番剧，一周内不重复</p>
+            <div class="daily-controls">
+                <div class="daily-style-selector">
+                    <span>推荐风格：</span>
+                    <button class="btn-secondary daily-style-btn active" data-style="standard">⚖️ 标准型</button>
+                    <button class="btn-secondary daily-style-btn" data-style="explore">🔭 探索型</button>
+                    <button class="btn-secondary daily-style-btn" data-style="conservative">🎯 保守型</button>
+                </div>
+                <div class="daily-status">
+                    <span id="daily-date" class="hint"></span>
+                    <span id="daily-count" class="hint"></span>
+                </div>
+            </div>
+            <div id="daily-loading" style="color: #94a3b8; text-align: center; padding: 40px;">
+                点击下方按钮加载每日推荐
+            </div>
+            <div id="daily-results" class="results" style="display:none"></div>
+            <div style="text-align: center; margin-top: 16px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                <button id="btn-load-daily" class="btn-primary">📅 加载今日推荐</button>
+                <div class="export-dropdown">
+                    <button id="btn-daily-export" class="btn-secondary">📥 导出 ▾</button>
+                    <div id="daily-export-menu" class="export-menu">
+                        <button data-fmt="docx">📄 Word 文档</button>
+                        <button data-fmt="image">🖼️ 封面海报</button>
+                        <button data-fmt="txt">📝 文本列表</button>
+                        <button data-fmt="csv">📊 CSV 表格</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== Tab 7: 调参 ========== -->
+        <section id="tab-settings" class="tab-content">
+            <h2>调参（15 因子 · 三档可调）</h2>
+            <p class="hint">全部 15 个因子均可调整，分低/中/高三档。建议同时只调 2-3 个因子。
+            <strong>调参在推荐流程最后一步生效</strong>，影响「按看番历史」「每日推荐」。点"重置"恢复默认。</p>
+            <div id="weight-sliders" class="weight-sliders"></div>
+            <div class="actions">
+                <button id="btn-reset-weights" class="btn-secondary">重置默认</button>
+                <button id="btn-save-weights" class="btn-primary">保存到本地</button>
+            </div>
+            <div id="weight-status" class="weight-status"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p class="version">build <span id="footer-date">2026-08-14</span></p>
+    </footer>
+
+    <!-- ===== 番剧详情弹窗 ===== -->
+    <div id="anime-detail-overlay" class="detail-overlay">
+        <div class="detail-modal">
+            <button class="detail-close" title="关闭">&times;</button>
+            <div class="detail-scroll">
+                <!-- 头部：封面 + 基本信息 -->
+                <div class="detail-header">
+                    <div class="detail-cover">
+                        <img id="detail-cover-img" src="" alt="">
+                    </div>
+                    <div class="detail-meta">
+                        <h2 id="detail-title"></h2>
+                        <div id="detail-original-title" class="detail-original-name"></div>
+                        <div class="detail-stats" id="detail-stats"></div>
+                        <div class="detail-tags" id="detail-tags"></div>
+                    </div>
+                </div>
+
+                <!-- 简介 -->
+                <div class="detail-section" id="detail-summary-section">
+                    <h3>📖 简介</h3>
+                    <p id="detail-summary"></p>
+                </div>
+
+                <!-- 制作信息 -->
+                <div class="detail-section" id="detail-info-section">
+                    <h3>📋 制作信息</h3>
+                    <div id="detail-info"></div>
+                </div>
+
+                <!-- 声优 -->
+                <div class="detail-section" id="detail-va-section">
+                    <h3>🎤 声优阵容</h3>
+                    <div id="detail-va"></div>
+                </div>
+
+                <!-- 续集 -->
+                <div class="detail-section" id="detail-sequels-section" style="display:none">
+                    <h3>📺 续集系列</h3>
+                    <div id="detail-sequels" class="detail-card-row"></div>
+                </div>
+
+                <!-- 相似推荐 -->
+                <div class="detail-section" id="detail-similar-section">
+                    <h3>🎯 相似番剧</h3>
+                    <div id="detail-similar" class="detail-card-row"></div>
+                </div>
+            </div>
+            <div class="detail-footer">
+                <button id="detail-btn-watchlist" class="btn-secondary">📌 加入待看</button>
+                <button id="detail-btn-favorite" class="btn-secondary">⭐ 收藏</button>
+                <button id="detail-btn-recommend" class="btn-primary">🎯 以此为种子推荐</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='style_selector.js') }}?v=1.0"></script>
+    <script src="{{ url_for('static', filename='script.js') }}?v=1.6"></script>
+    <script src="{{ url_for('static', filename='trending.js') }}?v=1.6"></script>
+    <script src="{{ url_for('static', filename='weights.js') }}?v=1.6"></script>
+    <script src="{{ url_for('static', filename='detail.js') }}?v=1.6"></script>
+    <script src="{{ url_for('static', filename='card.js') }}?v=1.6"></script>
+    <script src="{{ url_for('static', filename='va.js') }}?v=1.6"></script>
+
+    <!-- 全局事件委托：确保所有番剧卡片点击都打开详情弹窗 -->
+    <script>
+    document.addEventListener('click', function(e) {
+        const card = e.target.closest('.anime-card');
+        if (!card) return;
+        // 跳过已明确标记为「推荐按钮」的元素（如弹窗内的推荐按钮）
+        if (e.target.closest('#detail-btn-recommend')) return;
+        const id = parseInt(card.dataset.id);
+        if (id && typeof openAnimeDetail === 'function') {
+            e.stopPropagation();
+            e.preventDefault();
+            openAnimeDetail(id);
+        }
+    });
+    </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 配置文件（含 token，不能上传）
+.env
+
+# 数据缓存（大文件，~46MB）
+data/anime_cache.json
+
+# BGM 音乐文件（~62MB，用户自添加）
+static/bgm/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
