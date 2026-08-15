@@ -1,13 +1,14 @@
 """NEP 启动脚本 (生产环境 - Railway/Render/Heroku)
 
 启动流程：
-  1. 检测 data/anime_cache.json 是否存在
-  2. 不存在 → 自动从 AniList 拉取（5-10分钟）
-  3. 启动 Gunicorn（生产 WSGI 服务器）
+  1. 检查数据缓存是否存在
+  2. 不存在 → **后台线程**慢慢拉取（不阻塞服务器启动）
+  3. 立即启动 Gunicorn（生产 WSGI 服务器）
+  4. 数据未就绪时返回友好提示页面
 """
 import os
 import sys
-import subprocess
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -20,26 +21,25 @@ def has_cache() -> bool:
         return False
     try:
         size_mb = CACHE_FILE.stat().st_size / 1024 / 1024
-        return size_mb > 1  # 至少 1MB 才算有效
+        return size_mb > 1
     except Exception:
         return False
 
 
-def fetch_data():
-    """从 AniList 拉取番剧数据"""
+def fetch_data_background():
+    """后台线程从 AniList 拉取番剧数据"""
     print("=" * 60)
-    print("[BOOT] 番剧数据不存在，开始拉取（约5-10分钟）")
+    print("[BOOT-BG] 番剧数据不存在，后台开始拉取（约5-10分钟）")
     print("=" * 60)
     try:
         import data_loader
-        # 用 AniList 配置：更快、并发3
         os.environ.setdefault("FETCH_DELAY", "0.2")
         os.environ.setdefault("FETCH_CONCURRENCY", "3")
         data_loader.fetch_all()
-        print(f"[BOOT] ✅ 数据拉取完成: {CACHE_FILE}")
+        size = CACHE_FILE.stat().st_size / 1024 / 1024
+        print(f"[BOOT-BG] ✅ 数据拉取完成 ({size:.1f} MB)")
     except Exception as e:
-        print(f"[BOOT] ❌ 数据拉取失败: {e}")
-        print("[BOOT] 继续启动服务器，可能因数据缺失而报错")
+        print(f"[BOOT-BG] ❌ 数据拉取失败: {e}")
 
 
 def start_server():
@@ -69,8 +69,13 @@ if __name__ == "__main__":
     print(f"[BOOT] 工作目录: {ROOT}")
 
     if has_cache():
-        print(f"[BOOT] ✅ 缓存已存在 ({CACHE_FILE.stat().st_size/1024/1024:.1f} MB)")
+        size = CACHE_FILE.stat().st_size / 1024 / 1024
+        print(f"[BOOT] ✅ 缓存已存在 ({size:.1f} MB)")
     else:
-        fetch_data()
+        # 后台拉数据（不阻塞启动）
+        print("[BOOT] 启动后台数据拉取线程...")
+        t = threading.Thread(target=fetch_data_background, daemon=True)
+        t.start()
+        print("[BOOT] 服务器先启动，数据慢慢拉")
 
     start_server()

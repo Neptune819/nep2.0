@@ -3,7 +3,5 @@ builder = "NIXPACKS"
 
 [deploy]
 startCommand = "python boot.py"
-healthcheckPath = "/api/tags"
-healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

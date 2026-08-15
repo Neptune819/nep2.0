@@ -40,6 +40,25 @@ def welcome():
     return render_template("welcome.html")
 
 
+@app.route("/health")
+def health():
+    """健康检查端点：始终返回 200，用于部署平台探活"""
+    return jsonify({"status": "ok", "service": "nep2.0"})
+
+
+@app.route("/loading")
+def loading():
+    """数据加载中提示页（如果 cache 还在拉取）"""
+    from pathlib import Path
+    cache = Path(__file__).parent / "data" / "anime_cache.json"
+    if cache.exists() and cache.stat().st_size > 1024 * 1024:
+        return redirect("/")
+    return ("<h1>⏳ 数据加载中，请稍候</h1>"
+            "<p>番剧数据正在从 AniList 拉取（约5-10分钟）。</p>"
+            "<p>请稍后再访问本页面，或刷新试试。</p>"
+            "<p><a href=\"/loading\">点此刷新</a></p>"), 503
+
+
 @app.route("/app")
 def index():
     return render_template("index.html")
