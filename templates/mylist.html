@@ -51,10 +51,11 @@
         <!-- ===== 收藏列表 Tab ===== -->
         <section id="tab-favorites" class="mylist-content active">
             <div class="list-actions">
-                <button id="btn-export" class="btn-secondary btn-small">📥 导出</button>
-                <button id="btn-import" class="btn-secondary btn-small">📤 导入</button>
+                <button id="btn-export" class="btn-secondary btn-small" title="备份收藏、待看、个人评分及推荐设置">📥 导出完整备份</button>
+                <button id="btn-import" class="btn-secondary btn-small" title="导入完整备份或旧版番剧列表">📤 导入备份</button>
                 <input type="file" id="import-file" accept=".json" style="display:none">
             </div>
+            <div id="import-report" role="status" aria-live="polite" style="display:none;margin:12px 0;padding:12px;border:1px solid rgba(148,163,184,.35);border-radius:10px;background:rgba(15,23,42,.7);line-height:1.7;"></div>
             <div class="list-filters">
                 <input type="text" id="filter-search" placeholder="搜索番剧名..." class="filter-input">
                 <select id="filter-rating" class="filter-select">
@@ -100,7 +101,7 @@
     </main>
 
     <footer>
-        <p>💡 提示：在推荐页点击番剧卡片，可加入收藏或待看</p>
+        <p>💡 个人记录保存在当前浏览器。换设备或清除浏览器数据前，请先导出完整备份。</p>
     </footer>
 
     <!-- ===== 番剧详情弹窗 ===== -->
@@ -121,13 +122,19 @@
     // ===== 常量 =====
     const WATCHLIST_KEY = 'anime_watchlist';
     const FAVORITES_KEY = 'anime_history';
+    const BACKUP_KEYS = ['quizResult', 'nep_recommend_style', 'nep_user_tuning', 'nep_recommendation_filters_v1'];
 
     // ===== localStorage 工具 =====
     function loadList(key) {
-        try { const r = localStorage.getItem(key); return r ? JSON.parse(r) : []; } catch(e) { return []; }
+        try {
+            const r = localStorage.getItem(key);
+            const value = r ? JSON.parse(r) : [];
+            return Array.isArray(value) ? value : [];
+        } catch(e) { return []; }
     }
     function saveList(key, list) {
-        try { localStorage.setItem(key, JSON.stringify(list)); } catch(e) {}
+        try { localStorage.setItem(key, JSON.stringify(list)); return true; }
+        catch(e) { alert('保存失败：浏览器存储空间不足，或禁止了本站保存数据。请先导出备份。'); return false; }
     }
     function isInList(key, id) {
         return loadList(key).some(a => a.id === id);
@@ -141,14 +148,14 @@
             name_cn: anime.name_cn || '',
             name_en: anime.name || '',
             image: anime.image || '',
-            rating: anime.rating || 0,
+            rating: Number(anime._userRated ? anime.rating : 0) || 0,
+            _userRated: Boolean(anime._userRated),
             year: anime.year || null,
             format: anime.format || null,
             tags_cn: (anime.tags || []).map(t => typeof t === 'string' ? t : (t.cn || t.en)).slice(0, 5),
             tags: (anime.tags || []).map(t => typeof t === 'string' ? t : (t.cn || t.en)).slice(0, 5),
         });
-        saveList(key, list);
-        return true;
+        return saveList(key, list);
     }
     function removeFromList(key, id) {
         saveList(key, loadList(key).filter(a => a.id !== id));
@@ -172,9 +179,6 @@
 
     // ===== 收藏列表 =====
     let animeList = loadList(FAVORITES_KEY);
-    // 修复旧数据
-    animeList = animeList.map(a => (a.rating === 7 && !a._userRated) ? {...a, rating: 0} : a);
-    saveList(FAVORITES_KEY, animeList);
 
     function renderFavorites(filter = {}) {
         let filtered = [...animeList];
@@ -233,15 +237,26 @@
             sel.addEventListener('change', e => {
                 const id = parseInt(e.target.dataset.id);
                 const anime = animeList.find(a => a.id === id);
-                if (anime) { anime.rating = parseInt(e.target.value); saveList(FAVORITES_KEY, animeList); }
+                if (anime) {
+                    const previous = {rating: anime.rating, _userRated: anime._userRated};
+                    anime.rating = parseInt(e.target.value);
+                    anime._userRated = anime.rating > 0;
+                    if (!saveList(FAVORITES_KEY, animeList)) {
+                        Object.assign(anime, previous);
+                        e.target.value = String(previous.rating || 0);
+                    } else {
+                        renderFavorites(getFilters());
+                    }
+                }
             });
         });
     }
 
     function removeFav(id) {
         if (confirm('确定要移除这部番剧吗？')) {
-            animeList = animeList.filter(a => a.id !== id);
-            saveList(FAVORITES_KEY, animeList);
+            const next = animeList.filter(a => a.id !== id);
+            if (!saveList(FAVORITES_KEY, next)) return;
+            animeList = next;
             renderFavorites(getFilters());
             updateCounts();
         }
@@ -477,46 +492,193 @@
 
     // 清空
     document.getElementById('btn-clear-all').addEventListener('click', () => {
-        if (confirm('确定要清空收藏列表吗？')) { animeList = []; saveList(FAVORITES_KEY, animeList); renderFavorites(getFilters()); updateCounts(); }
+        if (confirm('确定要清空收藏列表吗？') && saveList(FAVORITES_KEY, [])) {
+            animeList = [];
+            renderFavorites(getFilters());
+            updateCounts();
+        }
     });
     document.getElementById('btn-wl-clear').addEventListener('click', () => {
-        if (confirm('确定要清空待看列表吗？')) { saveList(WATCHLIST_KEY, []); renderWatchlist(getWlFilters()); updateCounts(); }
+        if (confirm('确定要清空待看列表吗？') && saveList(WATCHLIST_KEY, [])) {
+            renderWatchlist(getWlFilters());
+            updateCounts();
+        }
     });
 
-    // 导出
+    function storedArrayForBackup(key) {
+        const raw = localStorage.getItem(key);
+        if (raw === null) return [];
+        const value = JSON.parse(raw);
+        if (!Array.isArray(value)) throw new Error(`${key} 的本地数据格式不正确，请勿用空列表覆盖原数据。`);
+        return value;
+    }
+
+    function showImportReport(summary, issues = []) {
+        const report = document.getElementById('import-report');
+        report.replaceChildren();
+        const headline = document.createElement('strong');
+        headline.textContent = summary;
+        report.appendChild(headline);
+        if (issues.length) {
+            const details = document.createElement('details');
+            details.style.marginTop = '8px';
+            const title = document.createElement('summary');
+            title.textContent = `查看 ${issues.length} 条未导入或待确认记录`;
+            details.appendChild(title);
+            const list = document.createElement('ol');
+            for (const issue of issues.slice(0, 100)) {
+                const item = document.createElement('li');
+                item.textContent = issue;
+                list.appendChild(item);
+            }
+            if (issues.length > 100) {
+                const item = document.createElement('li');
+                item.textContent = `另有 ${issues.length - 100} 条，请检查源文件。`;
+                list.appendChild(item);
+            }
+            details.appendChild(list);
+            report.appendChild(details);
+        }
+        report.style.display = 'block';
+    }
+
+    function validAnimeId(value) {
+        const id = Number(value);
+        return Number.isSafeInteger(id) && id > 0 ? id : null;
+    }
+
+    function mergeAnimeList(current, incoming, label, issues) {
+        const merged = current.map(a => ({...a}));
+        const index = new Map(merged.map((a, i) => [validAnimeId(a.id), i]));
+        const result = {added: 0, updated: 0, unchanged: 0, pending: 0, failed: 0};
+        incoming.forEach((item, position) => {
+            const title = item && typeof item === 'object' ? (item.name_cn || item.name || item.name_en || '') : '';
+            if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                result.failed++;
+                issues.push(`${label}第 ${position + 1} 条：不是番剧对象，已跳过。`);
+                return;
+            }
+            const id = validAnimeId(item.id);
+            if (!id) {
+                result.pending++;
+                issues.push(`${label}第 ${position + 1} 条「${String(title).slice(0, 80) || '未命名'}」：缺少有效番剧 ID，需手动搜索确认，未自动合并。`);
+                return;
+            }
+            const next = {...item, id};
+            if (Object.prototype.hasOwnProperty.call(next, 'rating')) {
+                const rating = Number(next.rating);
+                if (!Number.isInteger(rating) || rating < 0 || rating > 10) {
+                    result.failed++;
+                    issues.push(`${label}第 ${position + 1} 条「${String(title).slice(0, 80)}」：个人评分应在 0～10 分之间，已跳过。`);
+                    return;
+                }
+                next.rating = rating;
+                next._userRated = rating > 0;
+            }
+            if (!index.has(id)) {
+                merged.push(next);
+                index.set(id, merged.length - 1);
+                result.added++;
+                return;
+            }
+            const i = index.get(id);
+            const previous = merged[i];
+            const candidate = {...previous, ...next};
+            for (const key of ['name', 'name_cn', 'name_en', 'image']) {
+                if (!next[key]) candidate[key] = previous[key];
+            }
+            // 旧版导出可能不含个人评分；缺失时保留现有评分。
+            if (!Object.prototype.hasOwnProperty.call(next, 'rating')) {
+                candidate.rating = previous.rating;
+                candidate._userRated = previous._userRated;
+            }
+            if (JSON.stringify(candidate) === JSON.stringify(previous)) result.unchanged++;
+            else { merged[i] = candidate; result.updated++; }
+        });
+        return {merged, result};
+    }
+
+    // 备份从当前存储读取，包含推荐历史、待看列表和用户设置。
     document.getElementById('btn-export').addEventListener('click', () => {
-        const data = JSON.stringify(animeList, null, 2);
-        const blob = new Blob([data], {type:'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'anime_list_' + new Date().toISOString().slice(0,10) + '.json';
-        a.click();
-        URL.revokeObjectURL(url);
+        try {
+            const backup = {
+                format: 'nep-backup', version: 2, exported_at: new Date().toISOString(),
+                anime_history: storedArrayForBackup(FAVORITES_KEY),
+                anime_watchlist: storedArrayForBackup(WATCHLIST_KEY),
+            };
+            for (const key of BACKUP_KEYS) {
+                const raw = localStorage.getItem(key);
+                if (raw !== null) backup[key] = key === 'nep_recommend_style' ? raw : JSON.parse(raw);
+            }
+            const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'NEP_完整备份_' + new Date().toISOString().slice(0,10) + '.json';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) {
+            showImportReport('导出失败：' + error.message);
+        }
     });
 
-    // 导入
+    // 兼容旧版纯数组；导入先在内存合并并验证，写入失败时回滚。
     document.getElementById('btn-import').addEventListener('click', () => document.getElementById('import-file').click());
     document.getElementById('import-file').addEventListener('change', e => {
         const file = e.target.files[0];
+        e.target.value = '';
         if (!file) return;
+        if (file.size > 20 * 1024 * 1024) { showImportReport('导入失败：文件超过 20 MB。'); return; }
         const reader = new FileReader();
+        reader.onerror = () => showImportReport('导入失败：无法读取文件。');
         reader.onload = ev => {
             try {
-                const imported = JSON.parse(ev.target.result);
-                if (Array.isArray(imported)) {
-                    const ids = new Set(animeList.map(a => a.id));
-                    let added = 0;
-                    imported.forEach(a => { if (a.id && !ids.has(a.id)) { animeList.push(a); ids.add(a.id); added++; } });
-                    saveList(FAVORITES_KEY, animeList);
-                    renderFavorites(getFilters());
-                    updateCounts();
-                    alert('成功导入 ' + added + ' 部番剧！');
+                const input = JSON.parse(ev.target.result);
+                const legacy = Array.isArray(input);
+                if (!legacy && (!input || typeof input !== 'object' || input.format !== 'nep-backup' || input.version !== 2 || !Array.isArray(input.anime_history))) {
+                    throw new Error('不支持的备份格式。请选择 NEP 完整备份或旧版番剧列表 JSON。');
                 }
-            } catch(err) { alert('导入失败：' + err.message); }
+                if (!legacy && input.anime_watchlist !== undefined && !Array.isArray(input.anime_watchlist)) {
+                    throw new Error('待看列表格式不正确，未写入任何数据。');
+                }
+                const issues = [];
+                const historyImport = mergeAnimeList(storedArrayForBackup(FAVORITES_KEY), legacy ? input : input.anime_history, '收藏／历史', issues);
+                const watchImport = mergeAnimeList(storedArrayForBackup(WATCHLIST_KEY), legacy ? [] : (input.anime_watchlist || []), '待看', issues);
+                const writes = {
+                    [FAVORITES_KEY]: JSON.stringify(historyImport.merged),
+                    [WATCHLIST_KEY]: JSON.stringify(watchImport.merged),
+                };
+                if (!legacy) {
+                    for (const key of BACKUP_KEYS) {
+                        if (Object.prototype.hasOwnProperty.call(input, key) && input[key] !== null) {
+                            if (key === 'nep_recommend_style') {
+                                if (['explore', 'standard', 'conservative'].includes(input[key])) writes[key] = input[key];
+                            } else if (typeof input[key] === 'object' && !Array.isArray(input[key])) {
+                                writes[key] = JSON.stringify(input[key]);
+                            }
+                        }
+                    }
+                }
+                const before = Object.fromEntries(Object.keys(writes).map(key => [key, localStorage.getItem(key)]));
+                try {
+                    for (const [key, value] of Object.entries(writes)) localStorage.setItem(key, value);
+                } catch (error) {
+                    for (const [key, value] of Object.entries(before)) {
+                        try { value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch (_) {}
+                    }
+                    throw new Error('浏览器存储写入失败；已尝试恢复原数据，请检查空间或隐私设置。');
+                }
+                animeList = historyImport.merged;
+                renderFavorites(getFilters());
+                renderWatchlist(getWlFilters());
+                updateCounts();
+                const h = historyImport.result, w = watchImport.result;
+                showImportReport(`导入完成：新增 ${h.added + w.added} 部，更新 ${h.updated + w.updated} 部，未变化 ${h.unchanged + w.unchanged} 部；待确认 ${h.pending + w.pending} 条，失败 ${h.failed + w.failed} 条。${legacy ? '（旧版列表仅含收藏／历史）' : '推荐设置也已恢复；刷新页面后生效。'}`, issues);
+            } catch (error) {
+                showImportReport('导入失败：' + error.message + '；原数据未被清空。');
+            }
         };
         reader.readAsText(file);
-        e.target.value = '';
     });
 
     // 计数

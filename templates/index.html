@@ -102,6 +102,7 @@
                 <input type="text" id="search-anime" placeholder="输入番剧名（如：进击的巨人 / Cowboy Bebop / 命运石之门）" autocomplete="off">
                 <div id="search-results" class="search-results"></div>
             </div>
+            <p class="hint">发现中文名不准确？<a href="https://github.com/Neptune-ux-sys/nep2.0/issues/new" target="_blank" rel="noopener noreferrer">提交译名纠错</a></p>
             <div id="sequels-row" class="sequel-row" style="display:none">
                 <h3 class="sequel-title">📺 续集系列</h3>
                 <div id="results-sequels" class="sequel-cards"></div>
@@ -123,6 +124,7 @@
                 <a href="/mylist" class="btn-secondary" style="text-decoration:none">📚 我的列表</a>
                 <button id="btn-batch-import" class="btn-secondary">📋 批量导入</button>
                 <button id="btn-file-import" class="btn-secondary">📁 导入文件</button>
+                <button id="btn-bangumi-import" class="btn-secondary">🔗 导入 Bangumi 账号</button>
                 <div class="export-dropdown">
                     <button id="btn-export-menu" class="btn-secondary">📥 导出 ▾</button>
                     <div id="export-menu" class="export-menu">
@@ -134,6 +136,13 @@
                 </div>
                 <button id="btn-recommend-history" class="btn-primary" disabled>📚 推荐</button>
                 <button id="btn-clear-history" class="btn-secondary">清空</button>
+            </div>
+            <div id="bangumi-import-panel" class="batch-import-panel" style="display:none">
+                <h3>🔗 从 Bangumi 导入看番记录</h3>
+                <p class="hint">输入公开的 Bangumi 用户名或数字 ID。导入前会显示匹配结果；账号收藏设为私密的条目无法读取。</p>
+                <div class="search-box"><input id="bangumi-username" type="text" maxlength="80" placeholder="Bangumi 用户名或数字 ID" autocomplete="off"></div>
+                <div class="batch-import-actions"><button id="btn-fetch-bangumi" class="btn-primary">读取记录</button><button id="btn-close-bangumi" class="btn-secondary">取消</button></div>
+                <div id="bangumi-import-result" class="batch-parse-result" aria-live="polite"></div>
             </div>
             <!-- 批量导入面板 -->
             <div id="batch-import-panel" class="batch-import-panel" style="display:none">
@@ -269,6 +278,17 @@
 
         <!-- ========== Tab 7: 调参 ========== -->
         <section id="tab-settings" class="tab-content">
+            <h2>全站推荐过滤</h2>
+            <p class="hint">设置会用于所有推荐入口，包括问卷结果。搜索与我的列表仍可查看这些作品。</p>
+            <div class="nep-filter-settings">
+                <label><input id="nep-exclude-watched" type="checkbox" checked> 不推荐已看过的番剧</label>
+                <label>最早年份 <input id="nep-min-year" type="number" min="1900" max="2100" step="1" placeholder="不限" style="max-width:110px"> 年</label>
+                <label for="nep-exclude-tags">永不推荐的标签（用逗号分隔）</label>
+                <input id="nep-exclude-tags" type="text" list="nep-filter-tag-options" placeholder="例如：机战, 运动" autocomplete="off">
+                <datalist id="nep-filter-tag-options"></datalist>
+                <div class="actions"><button id="nep-save-filters" class="btn-primary">保存过滤条件</button><button id="nep-reset-filters" class="btn-secondary">清空过滤条件</button></div>
+                <p id="nep-filter-status" class="hint" aria-live="polite"></p>
+            </div>
             <h2>调参（15 因子 · 三档可调）</h2>
             <p class="hint">全部 15 个因子均可调整，分低/中/高三档。建议同时只调 2-3 个因子。
             <strong>调参在推荐流程最后一步生效</strong>，影响「按看番历史」「每日推荐」。点"重置"恢复默认。</p>
@@ -342,6 +362,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='style_selector.js') }}?v=1.0"></script>
+    <script src="{{ url_for('static', filename='preferences.js') }}?v=1.0"></script>
     <script src="{{ url_for('static', filename='script.js') }}?v=1.6"></script>
     <script src="{{ url_for('static', filename='trending.js') }}?v=1.6"></script>
     <script src="{{ url_for('static', filename='weights.js') }}?v=1.6"></script>
@@ -354,6 +375,7 @@
     document.addEventListener('click', function(e) {
         const card = e.target.closest('.anime-card');
         if (!card) return;
+        if (e.target.closest('.personal-rating')) return;
         // 跳过已明确标记为「推荐按钮」的元素（如弹窗内的推荐按钮）
         if (e.target.closest('#detail-btn-recommend')) return;
         const id = parseInt(card.dataset.id);

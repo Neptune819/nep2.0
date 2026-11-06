@@ -470,7 +470,14 @@
 
     <script src="{{ url_for('static', filename='style_selector.js') }}?v=1.0"></script>
     <script src="{{ url_for('static', filename='detail.js') }}?v=1.6"></script>
+    <script src="{{ url_for('static', filename='preferences.js') }}?v=1.0"></script>
+    <script src="{{ url_for('static', filename='card.js') }}?v=1.7"></script>
     <script>
+    document.addEventListener('click', event => {
+        if (event.target.closest('.personal-rating')) return;
+        const card = event.target.closest('.anime-card[data-id]');
+        if (card) openAnimeDetail(Number(card.dataset.id));
+    });
     // 状态
     let currentMode = null;
     // currentStyle 由 style_selector.js 提供（带 localStorage 持久化）
@@ -642,7 +649,8 @@
                 body: JSON.stringify({
                     mode: currentMode,
                     style: currentStyle,
-                    answers: answersData
+                    answers: answersData,
+                    ...nepApiFilterPayload()
                 })
             });
             quizResult = await r.json();
@@ -675,7 +683,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     profile: quizResult.profile,
-                    style: currentStyle
+                    style: currentStyle,
+                    ...nepApiFilterPayload()
                 })
             });
             const data = await r.json();
@@ -684,28 +693,16 @@
             gridDiv.style.display = 'grid';
 
             // 渲染每日推荐结果
-            const allResults = [
+            const allResults = nepFilterAnimeList([
                 ...(data.recommendations?.underrated || []),
                 ...(data.recommendations?.vintage || []),
                 ...(data.recommendations?.blind_spot || [])
-            ];
+            ]);
 
             // 记录已展示的ID
             allResults.forEach(a => shownAnimeIds.add(a.id));
 
-            gridDiv.innerHTML = allResults.slice(0, 100).map(a => `
-                <div class="anime-card" data-id="${a.id}" onclick="openAnimeDetail(${a.id})">
-                    <img class="image" src="${escapeHtml(a.image)}" loading="lazy"
-                         onerror="this.style.background='#374151'; this.removeAttribute('src')">
-                    <div class="body">
-                        <div class="title">${escapeHtml(a.name_cn || a.name)}</div>
-                        <div class="meta">
-                            ${a.rating ? `<span class="rating-badge">⭐ ${a.rating}</span>` : ''}
-                        </div>
-                        ${a.reason ? `<div class="reasons"><span class="reason">${escapeHtml(a.reason)}</span></div>` : ''}
-                    </div>
-                </div>
-            `).join('');
+            gridDiv.innerHTML = allResults.slice(0, 100).map(renderCardDetailed).join('');
 
             dateDiv.textContent = `📅 ${data.date} | 共 ${data.total} 部 | ${styleConfig[currentStyle].name}模式`;
         } catch (e) {
@@ -786,6 +783,7 @@
             results = quizResult.recommendations?.[tab] || [];
         }
         
+        results = nepFilterAnimeList(results);
         if (results.length === 0) {
             resultDiv.innerHTML = '<p style="color: #94a3b8;">暂无推荐</p>';
             return;
@@ -794,19 +792,7 @@
         // 记录已展示的番剧ID
         results.forEach(a => shownAnimeIds.add(a.id));
         
-        resultDiv.innerHTML = results.map(a => `
-            <div class="anime-card" data-id="${a.id}" onclick="openAnimeDetail(${a.id})">
-                <img class="image" src="${escapeHtml(a.image)}" loading="lazy"
-                     onerror="this.style.background='#374151'; this.removeAttribute('src')">
-                <div class="body">
-                    <div class="title">${escapeHtml(a.name_cn || a.name)}</div>
-                    <div class="meta">
-                        ${a.rating ? `<span class="rating-badge">⭐ ${a.rating}</span>` : ''}
-                    </div>
-                    ${a.reason ? `<div class="reasons"><span class="reason">${escapeHtml(a.reason)}</span></div>` : ''}
-                </div>
-            </div>
-        `).join('');
+        resultDiv.innerHTML = results.map(renderCardDetailed).join('');
     }
 
     // 显示发现型推荐tab
@@ -822,6 +808,7 @@
         
         try {
             // 重新调用API获取新的推荐，传入已展示的ID避免重复
+            const prefs = nepApiFilterPayload();
             const r = await fetch('/api/quiz/recommend', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -829,7 +816,8 @@
                     profile: quizResult.profile,
                     style: currentStyle,
                     limit: 50,
-                    exclude_ids: Array.from(shownAnimeIds)
+                    ...prefs,
+                    exclude_ids: [...new Set([...shownAnimeIds, ...prefs.exclude_ids])]
                 })
             });
             const newRecommendations = await r.json();

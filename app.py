@@ -14,9 +14,10 @@ import os
 import io
 import csv
 from pathlib import Path
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, render_template, send_file, redirect
 
 import data_loader
+from bangumi_import import BangumiImportError, import_public_watched
 from recommender import AnimeRecommender
 from quiz_system import QuizProcessor, SIMPLE_QUIZ, COMPLEX_QUIZ
 from psych_profile import R18_TAGS
@@ -99,6 +100,18 @@ def api_search():
         "popularity": a.get("popularity") or 0,
         "favourites": a.get("favourites") or 0,
     } for a in results]})
+
+
+@app.route("/api/bangumi/import", methods=["POST"])
+def api_bangumi_import():
+    """Import public Bangumi animation collections marked as watched."""
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error": "请求数据格式不正确"}), 400
+    try:
+        return jsonify(import_public_watched(body.get("username", ""), get_recommender().anime_list))
+    except BangumiImportError as exc:
+        return jsonify({"error": str(exc)}), exc.status
 
 
 @app.route("/api/anime/<int:anime_id>")
@@ -209,6 +222,79 @@ def _parse_tuning_arg(raw):
     return None
 
 
+def _recommendation_filters(body=None):
+    """Read shared per-browser filters from GET query or POST JSON body."""
+    source = body if isinstance(body, dict) else request.args
+
+    def values(key):
+        raw = source.get(key, [])
+        if isinstance(raw, str):
+            return [part.strip() for part in raw.split(",") if part.strip()]
+        return raw if isinstance(raw, list) else []
+
+    ids = set()
+    for value in values("exclude_ids")[:10000]:
+        try:
+            ids.add(int(value))
+        except (TypeError, ValueError):
+            pass
+    tags = {str(tag).strip().casefold() for tag in values("exclude_tags")[:100] if str(tag).strip()}
+    # AniList uses several specific tags instead of a general "mecha" or "sports" tag.
+    alias_groups = {
+        "机战": {"robots", "real robot", "super robot"},
+        "机甲": {"robots", "real robot", "super robot"},
+        "mecha": {"robots", "real robot", "super robot"},
+        "运动": {"athletics", "baseball", "basketball", "football", "american football",
+                 "volleyball", "tennis", "table tennis", "badminton", "swimming",
+                 "cycling", "boxing", "wrestling", "golf", "handball", "skateboarding",
+                 "watersports", "fencing", "archery"},
+    }
+    alias_groups["运动番"] = alias_groups["运动"]
+    alias_groups["体育"] = alias_groups["运动"]
+    alias_groups["sports"] = alias_groups["运动"]
+    for tag in tuple(tags):
+        tags.update(alias_groups.get(tag, ()))
+    try:
+        min_year = int(source.get("min_year") or 0)
+    except (TypeError, ValueError):
+        min_year = 0
+    if min_year < 1900 or min_year > 2100:
+        min_year = 0
+    return ids, tags, min_year
+
+
+def _filter_recommendations(items, filters, recommender=None):
+    """Use full catalogue tags; the public result objects contain only eight."""
+    excluded_ids, excluded_tags, min_year = filters
+    if not (excluded_ids or excluded_tags or min_year):
+        return items
+    r = recommender or get_recommender()
+    filtered = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        aid = item.get("id")
+        if aid in excluded_ids:
+            continue
+        local_index = r._id_to_idx.get(aid)
+        anime = r.anime_list[local_index] if local_index is not None else item
+        if min_year and int(anime.get("year") or anime.get("season_year") or 0) < min_year:
+            continue
+        if excluded_tags:
+            all_tags = {str(t).strip().casefold() for t in (anime.get("tags") or [])}
+            all_tags.update(str(t).strip().casefold() for t in (anime.get("tags_cn") or []))
+            if all_tags & excluded_tags:
+                continue
+        filtered.append(item)
+    return filtered
+
+
+def _filter_discovery(result, filters, recommender=None):
+    for category in ("underrated", "vintage", "blind_spot"):
+        result[category] = _filter_recommendations(result.get(category, []), filters, recommender)
+    return result
+
+
 @app.route("/api/recommend/anime")
 def api_recommend_anime():
     """模式 1：基于番剧相似度推荐。
@@ -222,11 +308,14 @@ def api_recommend_anime():
     with_sequels = request.args.get("with_sequels", default="0") in ("1", "true", "yes")
     style = request.args.get("style", default="standard")
     user_tuning = _parse_tuning_arg(request.args.get("tuning"))
+    filters = _recommendation_filters()
     try:
         r = get_recommender()
         if with_sequels:
             # 返回 {main, sequels} 结构
             bundle = r.recommend_by_anime_with_sequels(anime_id, top_k=200)
+            bundle["main"] = _filter_recommendations(bundle["main"], filters, r)
+            bundle["sequels"] = _filter_recommendations(bundle["sequels"], filters, r)
             main = bundle["main"][offset:offset + limit]
             return jsonify({
                 "results": main,
@@ -237,6 +326,7 @@ def api_recommend_anime():
         else:
             results = r.recommend_by_anime(anime_id, top_k=200,
                                            style=style, user_tuning=user_tuning)
+            results = _filter_recommendations(results, filters, r)
             page = results[offset:offset + limit]
             return jsonify({
                 "results": page,
@@ -260,10 +350,12 @@ def api_recommend_history():
     offset = body.get("offset", 0)
     style = body.get("style", "standard")
     user_tuning = body.get("tuning") or None
+    filters = _recommendation_filters(body)
     try:
         r = get_recommender()
         results = r.recommend_by_history(history, top_k=200,
                                          style=style, user_tuning=user_tuning)
+        results = _filter_recommendations(results, filters, r)
         page = results[offset:offset + limit]
         return jsonify({
             "results": page,
@@ -287,10 +379,12 @@ def api_recommend_tags():
     offset = body.get("offset", 0)
     style = body.get("style", "standard")
     user_tuning = body.get("tuning") or None
+    filters = _recommendation_filters(body)
     try:
         r = get_recommender()
         results = r.recommend_by_tags(tags, top_k=200,
                                       style=style, user_tuning=user_tuning)
+        results = _filter_recommendations(results, filters, r)
         page = results[offset:offset + limit]
         return jsonify({
             "results": page,
@@ -312,10 +406,12 @@ def api_recommend_trending():
     offset = request.args.get("offset", default=0, type=int)
     season = request.args.get("season", default=None)
     year = request.args.get("year", default=None, type=int)
+    filters = _recommendation_filters()
     try:
         r = get_recommender()
         # 一次取大些用于分页
         all_results = r.recommend_trending(limit=200, season=season, year=year)
+        all_results = _filter_recommendations(all_results, filters, r)
         page = all_results[offset:offset + limit]
         return jsonify({
             "results": page,
@@ -333,9 +429,11 @@ def api_recommend_discovery():
     """
     anime_id = request.args.get("id", type=int)
     limit = request.args.get("limit", default=30, type=int)
+    filters = _recommendation_filters()
     try:
         r = get_recommender()
         result = r.recommend_discovery(anime_id=anime_id, limit=limit)
+        result = _filter_discovery(result, filters, r)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -349,9 +447,11 @@ def api_recommend_discovery_history():
     body = request.get_json(silent=True) or {}
     history = body.get("history", [])
     limit = body.get("limit", 30)
+    filters = _recommendation_filters(body)
     try:
         r = get_recommender()
         result = r.recommend_discovery(history=history, limit=limit)
+        result = _filter_discovery(result, filters, r)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -365,9 +465,11 @@ def api_recommend_discovery_tags():
     body = request.get_json(silent=True) or {}
     tags = body.get("tags", [])
     limit = body.get("limit", 30)
+    filters = _recommendation_filters(body)
     try:
         r = get_recommender()
         result = r.recommend_discovery(tags=tags, limit=limit)
+        result = _filter_discovery(result, filters, r)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -412,11 +514,13 @@ def api_anime_by_va():
     """声优 → 番剧列表。Query: name, limit"""
     name = request.args.get("name", default="", type=str)
     limit = request.args.get("limit", default=50, type=int)
+    filters = _recommendation_filters()
     if not name:
         return jsonify({"error": "missing name"}), 400
     try:
         r = get_recommender()
         results = r.get_anime_by_va(name, limit=limit)
+        results = _filter_recommendations(results, filters, r)
         return jsonify({"results": results, "va": name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1162,6 +1266,7 @@ def api_recommend_by_quiz():
     Body: {"tags": ["tag1", "tag2"], "factors": {"rating": 0.8, ...}}
     """
     body = request.get_json(silent=True) or {}
+    filters = _recommendation_filters(body)
     tags = body.get("tags", [])
     factors = body.get("factors", {})
     
@@ -1243,7 +1348,7 @@ def api_recommend_by_quiz():
         candidates.sort(key=lambda x: x.get("_final_score", 0), reverse=True)
         
         # 取前12个
-        results = candidates[:12]
+        results = _filter_recommendations(candidates, filters, r)[:12]
         
         return jsonify({"results": results})
     except Exception as e:
@@ -1284,6 +1389,7 @@ def api_quiz_submit():
     }
     """
     body = request.get_json(silent=True) or {}
+    filters = _recommendation_filters(body)
     mode = body.get("mode", "simple")
     style = body.get("style", "standard")
     answers = body.get("answers", [])
@@ -1302,6 +1408,7 @@ def api_quiz_submit():
 
         # 使用发现型推荐引擎
         discovery_result = r.recommend_discovery(tags=tags, limit=50, style=style)
+        discovery_result = _filter_discovery(discovery_result, filters, r)
 
         return jsonify({
             "profile": result["profile_dict"],
@@ -1328,10 +1435,11 @@ def api_quiz_recommend():
     }
     """
     body = request.get_json(silent=True) or {}
+    filters = _recommendation_filters(body)
     profile_dict = body.get("profile", {})
     style = body.get("style", "standard")
     limit = body.get("limit", 50)
-    exclude_ids = set(body.get("exclude_ids", []))
+    exclude_ids = filters[0]
 
     try:
         # 从字典重建心理画像
@@ -1381,6 +1489,7 @@ def api_quiz_recommend():
         # 使用发现型推荐
         r = get_recommender()
         result = r.recommend_discovery(tags=tags, limit=limit, exclude_ids=exclude_ids, style=style)
+        result = _filter_discovery(result, filters, r)
 
         return jsonify(result)
     except Exception as e:
@@ -1401,6 +1510,7 @@ def api_daily_recommend():
     }
     """
     body = request.get_json(silent=True) or {}
+    filters = _recommendation_filters(body)
     profile_dict = body.get("profile", {})
     style = body.get("style", "standard")
     history = body.get("history") or None
@@ -1471,7 +1581,7 @@ def api_daily_recommend():
         if not hasattr(app, '_daily_recommend_cache'):
             app._daily_recommend_cache = {}
 
-        exclude_ids = set()
+        exclude_ids = set(filters[0])
         for d in exclude_dates:
             cache_key = f"{d}-{style}"
             if cache_key in app._daily_recommend_cache:
@@ -1487,6 +1597,7 @@ def api_daily_recommend():
             style=style,
             seed=seed
         )
+        result = _filter_discovery(result, filters, r)
 
         # v3.0 后处理：调参（仅当用户调过）
         if user_tuning:
@@ -1702,4 +1813,5 @@ def api_export():
 
 if __name__ == "__main__":
     # debug=True 开发时用，发布时关掉
-    app.run(debug=True, port=5000, host="127.0.0.1", use_reloader=False)
+    port = int(os.environ.get("NEP_PORT", "5000"))
+    app.run(debug=False, port=port, host="127.0.0.1", use_reloader=False)

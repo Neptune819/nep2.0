@@ -29,6 +29,13 @@ function escapeHtml(s) {
     }[c]));
 }
 
+function animeNameFeedbackLink(query) {
+    const title = `番剧名称纠错：${query}`;
+    const body = `搜索词或现有译名：${query}\n建议的中文名：\n作品原名或 Bangumi 链接：\n问题说明：`;
+    const url = 'https://github.com/Neptune-ux-sys/nep2.0/issues/new?' + new URLSearchParams({title, body});
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">反馈缺失或译名错误</a>`;
+}
+
 // renderResults 由 card.js 覆盖（增强版用 renderCardDetailed 显示 reasons/tags_cn），
 // 这里先给个 fallback，让 card.js 加载前也能跑
 function renderResults(container, results, emptyMsg) {
@@ -72,7 +79,7 @@ searchInput.addEventListener('input', debounce(async () => {
         const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
         const data = await r.json();
         if (!data.results || data.results.length === 0) {
-            searchResults.innerHTML = '<div class="search-result-item" style="color:#9ca3af">没找到</div>';
+            searchResults.innerHTML = `<div class="search-result-item" style="color:#9ca3af">没找到。${animeNameFeedbackLink(q)}</div>`;
         } else {
             searchResults.innerHTML = data.results.map(a => `
                 <div class="search-result-item" data-id="${a.id}">
@@ -117,7 +124,7 @@ async function fetchRecommendationsByAnime(id, append = false) {
         currentOffset += PAGE_SIZE;
     }
     try {
-        const r = await fetch(`/api/recommend/anime?id=${id}&with_sequels=1&limit=${PAGE_SIZE}&offset=${currentOffset}&style=${currentStyle}&tuning=${encodeURIComponent(JSON.stringify(getUserTuning?.() || {}))}`);
+        const r = await fetch(`/api/recommend/anime?id=${id}&with_sequels=1&limit=${PAGE_SIZE}&offset=${currentOffset}&style=${currentStyle}&tuning=${encodeURIComponent(JSON.stringify(getUserTuning?.() || {}))}&${nepApiFilterQuery()}`);
         const data = await r.json();
         if (data.error) {
             resultsAnime.innerHTML = `<div class="empty">出错了: ${data.error}</div>`;
@@ -178,15 +185,107 @@ const resultsHistory = document.getElementById('results-history');
 
 // 使用 localStorage 持久化列表
 function loadHistory() {
-    const saved = localStorage.getItem('anime_history');
-    return saved ? JSON.parse(saved) : [];
+    try {
+        const saved = localStorage.getItem('anime_history');
+        const parsed = saved ? JSON.parse(saved) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (_) { return []; }
 }
 
 function saveHistory() {
-    localStorage.setItem('anime_history', JSON.stringify(history));
+    try {
+        localStorage.setItem('anime_history', JSON.stringify(history));
+        return true;
+    } catch (_) {
+        alert('看番记录未能保存，请检查浏览器是否允许本站存储数据，或先导出备份。');
+        return false;
+    }
 }
 
 const history = loadHistory();
+
+// A rating can also be changed from recommendation cards or the list page.
+window.addEventListener('storage', event => {
+    if (event.key !== 'anime_history') return;
+    history.splice(0, history.length, ...loadHistory());
+    renderHistory();
+});
+
+// Bangumi import previews matches and leaves ambiguous entries for explicit selection.
+const bangumiPanel = document.getElementById('bangumi-import-panel');
+const bangumiResult = document.getElementById('bangumi-import-result');
+let bangumiPreview = null;
+document.getElementById('btn-bangumi-import')?.addEventListener('click', () => {
+    bangumiPanel.style.display = bangumiPanel.style.display === 'none' ? 'block' : 'none';
+    if (bangumiPanel.style.display === 'block') bangumiPanel.scrollIntoView({behavior:'smooth', block:'nearest'});
+});
+document.getElementById('btn-close-bangumi')?.addEventListener('click', () => { bangumiPanel.style.display = 'none'; });
+document.getElementById('btn-fetch-bangumi')?.addEventListener('click', async () => {
+    const username = document.getElementById('bangumi-username').value.trim();
+    if (!username) { bangumiResult.textContent = '请输入 Bangumi 用户名或数字 ID。'; return; }
+    const button = document.getElementById('btn-fetch-bangumi');
+    button.disabled = true;
+    bangumiResult.textContent = '正在读取公开收藏并匹配本地番剧，请稍候……';
+    try {
+        const response = await fetch('/api/bangumi/import', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username})});
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || `请求失败（${response.status}）`);
+        bangumiPreview = data;
+        const counts = data.counts || {};
+        const ambiguous = (data.ambiguous || []).map((item, index) => `
+            <label style="display:block;margin:8px 0;">${escapeHtml(item.name || '未命名番剧')}：
+                <select class="bangumi-choice" data-index="${index}">
+                    <option value="">暂不导入</option>
+                    ${(item.candidates || []).map((candidate, i) => `<option value="${i}">${escapeHtml(candidate.name_cn || candidate.name || String(candidate.id))} · ${escapeHtml(candidate.name || '')} · ${escapeHtml(candidate.year || '?')}</option>`).join('')}
+                </select>
+            </label>`).join('');
+        const unmatched = (data.unmatched || []).map(item => `<li>${escapeHtml(item.name || String(item.bgm_subject_id || '未知作品'))}：${escapeHtml(item.reason || '未匹配')}</li>`).join('');
+        bangumiResult.innerHTML = `
+            <p>读取 ${Number(data.total) || 0} 条；自动匹配 ${Number(counts.matched) || 0} 条，待确认 ${Number(counts.ambiguous) || 0} 条，未匹配 ${Number(counts.unmatched) || 0} 条。</p>
+            ${ambiguous ? `<h4>重名或近似匹配，请选择正确作品</h4>${ambiguous}` : ''}
+            ${unmatched ? `<details><summary>查看未匹配作品</summary><ul>${unmatched}</ul></details>` : ''}
+            <button id="btn-apply-bangumi" class="btn-primary" ${!(data.matched || []).length && !ambiguous ? 'disabled' : ''}>导入已匹配的作品</button>`;
+        document.getElementById('btn-apply-bangumi')?.addEventListener('click', applyBangumiImport);
+    } catch (error) {
+        bangumiResult.textContent = `导入失败：${error.message}`;
+    } finally { button.disabled = false; }
+});
+
+function applyBangumiImport() {
+    if (!bangumiPreview) return;
+    const previousHistory = history.map(item => ({...item}));
+    const selected = [...(bangumiPreview.matched || [])];
+    bangumiResult.querySelectorAll('.bangumi-choice').forEach(select => {
+        if (select.value === '') return;
+        const item = bangumiPreview.ambiguous[Number(select.dataset.index)];
+        const candidate = item?.candidates?.[Number(select.value)];
+        if (candidate) selected.push({...candidate, rating:item.rating || 0});
+    });
+    let added = 0, updated = 0;
+    for (const item of selected) {
+        const id = Number(item.id);
+        if (!Number.isInteger(id)) continue;
+        const existing = history.find(a => Number(a.id) === id);
+        if (existing) {
+            if (Number(item.rating) > 0 && Number(existing.rating) !== Number(item.rating)) {
+                existing.rating = Number(item.rating);
+                updated++;
+            }
+        } else {
+            history.push({...item, id, name:item.name_cn || item.name || '', rating:Number(item.rating) || 0});
+            added++;
+        }
+    }
+    try {
+        if (!saveHistory()) {
+            history.splice(0, history.length, ...previousHistory);
+            return;
+        }
+        renderHistory();
+        bangumiResult.insertAdjacentHTML('afterbegin', `<p role="status">已新增 ${added} 部，更新评分 ${updated} 部；未匹配和未选择的作品没有写入。现在的推荐会排除已看作品。</p>`);
+        document.getElementById('btn-apply-bangumi').disabled = true;
+    } catch (error) { bangumiResult.insertAdjacentHTML('afterbegin', '<p role="alert">保存失败，请检查浏览器存储空间。</p>'); }
+}
 
 historyInput.addEventListener('input', debounce(async () => {
     const q = historyInput.value.trim();
@@ -197,7 +296,7 @@ historyInput.addEventListener('input', debounce(async () => {
     const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
     const data = await r.json();
     if (!data.results.length) {
-        historySearchResults.innerHTML = '<div class="search-result-item" style="color:#9ca3af">没找到</div>';
+        historySearchResults.innerHTML = `<div class="search-result-item" style="color:#9ca3af">没找到。${animeNameFeedbackLink(q)}</div>`;
     } else {
         historySearchResults.innerHTML = data.results.map(a => `
             <div class="search-result-item" data-id="${a.id}">
@@ -265,8 +364,12 @@ function renderHistory() {
         inp.addEventListener('change', () => {
             const v = parseInt(inp.value);
             if (v >= 1 && v <= 10) {
+                const previous = history[+inp.dataset.idx].rating;
                 history[+inp.dataset.idx].rating = v;
-                saveHistory();
+                if (!saveHistory()) {
+                    history[+inp.dataset.idx].rating = previous;
+                    inp.value = String(previous || 0);
+                }
             }
         });
     });
@@ -278,6 +381,7 @@ btnRecommendHistory.addEventListener('click', async () => {
     historyOffset = 0;
     historyPayload = {
         history: history.map(h => ({id: h.id, rating: h.rating})),
+        ...nepApiFilterPayload(),
         limit: HISTORY_PAGE,
         offset: 0,
         style: currentStyle,
@@ -667,6 +771,7 @@ btnRecommendTags.addEventListener('click', async () => {
     tagsOffset = 0;
     tagsPayload = {
         tags: [...selectedTags],
+        ...nepApiFilterPayload(),
         limit: TAGS_PAGE,
         offset: 0,
         style: currentStyle,
@@ -946,6 +1051,7 @@ bgmFileInput.addEventListener('change', async () => {
                     profile: profile,
                     style: dailyStyle,
                     history: history,
+                    ...nepApiFilterPayload(),
                     tuning: getUserTuning?.() || null,
                 })
             });

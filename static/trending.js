@@ -15,6 +15,9 @@ function buildTrendingParams(offset) {
     const p = new URLSearchParams(trendingBaseParams);
     p.set('limit', String(TRENDING_PAGE));
     p.set('offset', String(offset));
+    if (typeof nepApiFilterQuery === 'function') {
+        for (const [key, value] of nepApiFilterQuery()) p.set(key, value);
+    }
     return p;
 }
 

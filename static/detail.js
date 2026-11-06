@@ -21,7 +21,13 @@ function loadListFromStorage(key) {
 }
 
 function saveListToStorage(key, list) {
-    try { localStorage.setItem(key, JSON.stringify(list)); } catch (e) {}
+    try {
+        localStorage.setItem(key, JSON.stringify(list));
+        return true;
+    } catch (e) {
+        alert('保存失败：浏览器存储空间不足或已被禁用。');
+        return false;
+    }
 }
 
 function isInList(key, id) {
@@ -37,14 +43,13 @@ function addToList(key, anime) {
         name_cn: anime.name_cn || '',
         name_en: anime.name_original || anime.name || '',
         image: anime.image || '',
-        rating: anime.rating || 0,
+        rating: 0, // Public aggregate score is not the viewer's personal rating.
         year: anime.year || null,
         format: anime.format || null,
         tags_cn: (anime.tags || []).map(t => t.cn || t.en).slice(0, 5),
         tags: (anime.tags || []).map(t => t.cn || t.en).slice(0, 5),
     });
-    saveListToStorage(key, list);
-    return true;
+    return saveListToStorage(key, list);
 }
 
 function removeFromList(key, id) {

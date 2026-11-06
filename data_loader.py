@@ -33,6 +33,7 @@ import os
 import re
 import json
 import time
+import unicodedata
 import requests
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -87,6 +88,7 @@ def _load_va_translations() -> dict:
 
 _CN_MAPPING = None
 _MAL_CN_MAPPING = None
+_BANGUMI_TITLES = None
 _TAG_TRANS = None
 _VA_TRANS = None
 
@@ -108,6 +110,22 @@ def _get_mal_cn_mapping() -> dict:
             m = json.load(f)
         _MAL_CN_MAPPING = {int(k): v for k, v in m.get("id_to_cn_mal", {}).items()}
     return _MAL_CN_MAPPING
+
+
+def _get_bangumi_titles() -> dict:
+    """读取随项目提供的 bangumi-data 译名和别名，不依赖运行时网络。"""
+    global _BANGUMI_TITLES
+    if _BANGUMI_TITLES is None:
+        if CN_MAPPING_FILE.exists():
+            with open(CN_MAPPING_FILE, "r", encoding="utf-8") as f:
+                mapping = json.load(f)
+            _BANGUMI_TITLES = {
+                field: mapping.get(field, {})
+                for field in ("id_to_cn", "id_to_jp", "id_to_en")
+            }
+        else:
+            _BANGUMI_TITLES = {}
+    return _BANGUMI_TITLES
 
 
 def _get_tag_trans() -> dict:
@@ -517,6 +535,29 @@ def _save(data: list):
 
 # ============== 加载 / 搜索 ==============
 
+def _normalized_title(value: str) -> str:
+    """统一全半角、大小写与标题标点，保留中日韩文字及数字。"""
+    value = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(c for c in value if unicodedata.category(c)[0] in ("L", "N"))
+
+
+def _title_variants(anime: dict):
+    """按展示名、其他标题、Bangumi 别名顺序生成不重复的检索词。"""
+    seen = set()
+    for field in ("name_cn", "name", "name_jp", "name_en", "name_aliases"):
+        raw_values = anime.get(field) or []
+        if isinstance(raw_values, str):
+            raw_values = [raw_values]
+        for raw in raw_values:
+            if not isinstance(raw, str):
+                continue
+            title = raw.strip()
+            key = _normalized_title(title)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            yield field, title, key
+
 
 def display_name_cn(anime: dict) -> str:
     """返回番剧的"显示用中文名"。
@@ -789,30 +830,51 @@ def load_cache() -> list:
     with open(CACHE_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
     # 运行时二次过滤：排除非番剧格式 + 排除国漫
-    return [a for a in data if a.get("format") in _VALID_ANIME_FORMATS and not _is_chinese_anime(a)]
+    titles = _get_bangumi_titles()
+    result = []
+    for anime in data:
+        if anime.get("format") not in _VALID_ANIME_FORMATS or _is_chinese_anime(anime):
+            continue
+        key = str(anime.get("id", ""))
+        mapped_cn = (titles.get("id_to_cn", {}).get(key) or "").strip()
+        mapped_jp = (titles.get("id_to_jp", {}).get(key) or "").strip()
+        mapped_en = (titles.get("id_to_en", {}).get(key) or "").strip()
+        # Some mapping IDs point to a different season or work. Trust a Chinese
+        # title only when its Japanese title matches this exact cache record.
+        verified_title = (bool(mapped_jp) and _normalized_title(mapped_jp) == _normalized_title(anime.get("name_jp") or ""))
+        if not mapped_jp and mapped_en:
+            verified_title = _normalized_title(mapped_en) in {
+                _normalized_title(anime.get("name") or ""),
+                _normalized_title(anime.get("name_en") or ""),
+            }
+        aliases = []
+        if mapped_cn and verified_title:
+            anime["name_cn"] = mapped_cn
+        if verified_title:
+            aliases.extend((mapped_jp, mapped_en))
+        if aliases:
+            anime["name_aliases"] = aliases
+        result.append(anime)
+    return result
 
 
 def find_by_name(name: str, cache: list | None = None, limit: int = 10) -> list:
     """按名称模糊搜索。"""
     if cache is None:
         cache = load_cache()
-    name_lower = name.lower().strip()
-    if not name_lower:
+    key = _normalized_title(name)
+    if not key:
         return []
-    exact, prefix, contains = [], [], []
+    matches = []
     for a in cache:
-        for field in ("name", "name_jp", "name_en"):
-            v = (a.get(field) or "").lower()
-            if not v:
-                continue
-            if name_lower == v:
-                exact.append(a)
-            elif v.startswith(name_lower):
-                prefix.append(a)
-            elif name_lower in v:
-                contains.append(a)
-            break  # 只用第一个匹配的字段
-    return (exact + prefix + contains)[:limit]
+        best = 0
+        for _, _, title in _title_variants(a):
+            score = 3 if key == title else 2 if title.startswith(key) else 1 if key in title else 0
+            best = max(best, score)
+        if best:
+            matches.append((best, a))
+    matches.sort(key=lambda item: (-item[0], -(item[1].get("popularity") or 0)))
+    return [a for _, a in matches[:limit]]
 
 
 def search(query: str, cache: list | None = None, limit: int = 20) -> list:
@@ -828,8 +890,11 @@ def search(query: str, cache: list | None = None, limit: int = 20) -> list:
     """
     if cache is None:
         cache = load_cache()
-    q = query.strip().lower()
+    q = query.strip().casefold()
     if not q:
+        return []
+    q_norm = _normalized_title(q)
+    if not q_norm:
         return []
 
     exact, prefix, name_in, tag_in = [], [], [], []
@@ -837,13 +902,9 @@ def search(query: str, cache: list | None = None, limit: int = 20) -> list:
     for a in cache:
         # 名称字段（中/英/日）
         name_score, name_field = 0, None
-        for field, base in [("name_cn", 10), ("name", 8), ("name_jp", 7), ("name_en", 7)]:
-            v = (a.get(field) or "").lower()
-            if not v:
-                continue
-            # 标准化：去掉空格和斜杠等标点，让 "Fate Zero" 能匹到 "Fate/Zero"
-            v_norm = re.sub(r'[\s/\\·・:：\-_—,，。!！?？]+', '', v)
-            q_norm = re.sub(r'[\s/\\·・:：\-_—,，。!！?？]+', '', q)
+        for field, _, v_norm in _title_variants(a):
+            base = {"name_cn": 10, "name_aliases": 9, "name": 8,
+                    "name_jp": 7, "name_en": 7}[field]
             if q_norm == v_norm:
                 s = base * 3
             elif v_norm.startswith(q_norm):
@@ -927,29 +988,21 @@ def batch_match_anime(text: str, cache: list | None = None) -> list:
     if not text or not text.strip():
         return []
 
-    # 标准化文本：去空格+标点，小写（用于英文匹配）
-    text_norm = re.sub(r'[\s/\\·・:：\-_—,，。、!！?？;；|"\'""''「」『』\[\]()（）【】《》…~～+]+',
-                       '', text).lower()
+    # 与单条搜索使用相同的全半角、大小写和标点规范化规则。
+    text_norm = _normalized_title(text)
     if len(text_norm) < 2:
         return []
 
     # 第一步：在文本中搜索已知番剧名
-    # 每个番剧检查 name_cn > name > name_jp > name_en，取第一个匹配的字段
+    # 每个番剧检查展示名、其他标题和社区别名，取第一个匹配的字段。
     raw_matches = []  # [(anime, field, name_len, name_raw), ...]
 
     # 预计算名称缓存，避免重复 strip/lower
     name_cache = {}  # aid -> [(field, name_raw, name_norm, length), ...]
     for a in cache:
         aid = a["id"]
-        variants = []
-        for field in ("name_cn", "name", "name_jp", "name_en"):
-            raw = (a.get(field) or "").strip()
-            if not raw or len(raw) < 2:
-                continue
-            norm = re.sub(r'[\s/\\·・:：\-_—,，。、!！?？;；|"\'""''「」『』\[\]()（）【】《》…~～+]+',
-                          '', raw).lower()
-            if len(norm) >= 2:
-                variants.append((field, raw, norm, len(norm)))
+        variants = [(field, raw, norm, len(norm))
+                    for field, raw, norm in _title_variants(a) if len(norm) >= 2]
         if variants:
             name_cache[aid] = variants
 
@@ -962,7 +1015,7 @@ def batch_match_anime(text: str, cache: list | None = None) -> list:
         for field, name_raw, name_norm, name_len in variants:
             if name_norm in text_norm:
                 raw_matches.append((a, field, name_len, name_raw))
-                break  # 只取第一个匹配的字段（优先级: name_cn > name > name_jp > name_en）
+                break  # 同一作品只取优先级最高的匹配字段。
 
     if not raw_matches:
         return []
@@ -979,8 +1032,7 @@ def batch_match_anime(text: str, cache: list | None = None) -> list:
         aid = anime["id"]
         if aid in seen_ids:
             continue
-        name_norm = re.sub(r'[\s/\\·・:：\-_—,，。、!！?？;；|"\'""''「」『』\[\]()（）【】《》…~～+]+',
-                           '', name_raw).lower()
+        name_norm = _normalized_title(name_raw)
 
         # 检查是否被已保留的更长的名称"包含"
         is_subset = False
@@ -1035,16 +1087,18 @@ def _extract_rating_near_name(text: str, name: str) -> int | None:
     # 在文本中定位名称位置
     idx = text.find(name)
     if idx == -1:
-        # 尝试标准化后查找
-        name_norm = re.sub(r'[\s/\\·・:：\-_—,，。、!！?？;；|"\'""''「」『』\[\]()（）【】《》…~～+]+',
-                           '', name)
-        text_norm = re.sub(r'[\s/\\·・:：\-_—,，。、!！?？;；|"\'""''「」『』\[\]()（）【】《》…~～+]+',
-                           '', text)
-        idx = text_norm.find(name_norm)
-        if idx == -1:
+        # 标点不同时记录规范化字符对应的原始位置，避免把规范化索引用在原文上。
+        chars, positions = [], []
+        for pos, char in enumerate(text):
+            for normalized in _normalized_title(char):
+                chars.append(normalized)
+                positions.append(pos)
+        name_norm = _normalized_title(name)
+        normalized_idx = "".join(chars).find(name_norm)
+        if normalized_idx == -1:
             return None
-        # 用原始文本做后续匹配
-        text_after = text[idx + len(name):idx + len(name) + 30]
+        end = positions[normalized_idx + len(name_norm) - 1] + 1
+        text_after = text[end:end + 30]
     else:
         text_after = text[idx + len(name):idx + len(name) + 30]
 
