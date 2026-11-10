@@ -28,3 +28,5 @@ static/bgm/
 # Generated deployment output
 .vercel/
 public/
+.vercel
+.env*.local
