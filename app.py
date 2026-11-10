@@ -13,8 +13,9 @@ trending：支持 year/season 服务端过滤
 import os
 import io
 import csv
+import tempfile
 from pathlib import Path
-from flask import Flask, request, jsonify, render_template, send_file, redirect
+from flask import Flask, request, jsonify, render_template, send_file, send_from_directory, redirect
 
 import data_loader
 from bangumi_import import BangumiImportError, import_public_watched
@@ -52,7 +53,8 @@ def loading():
     """数据加载中提示页（如果 cache 还在拉取）"""
     from pathlib import Path
     cache = Path(__file__).parent / "data" / "anime_cache.json"
-    if cache.exists() and cache.stat().st_size > 1024 * 1024:
+    if any(p.exists() and p.stat().st_size > 1024 * 1024
+           for p in (cache, cache.with_suffix(".json.gz"))):
         return redirect("/")
     return ("<h1>⏳ 数据加载中，请稍候</h1>"
             "<p>番剧数据正在从 AniList 拉取（约5-10分钟）。</p>"
@@ -1049,7 +1051,30 @@ def extract_text_from_pdf(file):
 
 
 # ========== BGM 音乐功能 ==========
-BGM_DIR = Path(__file__).parent / "static" / "bgm"
+_SERVERLESS = os.environ.get("VERCEL") == "1"
+_MEDIA_ROOT = (Path(os.environ.get("NEP_MEDIA_DIR", Path(tempfile.gettempdir()) / "nep-media"))
+               if _SERVERLESS else None)
+BGM_DIR = (_MEDIA_ROOT / "bgm" if _MEDIA_ROOT else
+           Path(__file__).parent / "static" / "bgm")
+
+
+def _media_url(kind: str, filename: str) -> str:
+    from urllib.parse import quote
+    prefix = "/api/media" if _SERVERLESS else "/static"
+    return f"{prefix}/{kind}/{quote(filename)}"
+
+
+def _valid_media_filename(filename: str) -> bool:
+    return (bool(filename) and filename not in {".", ".."}
+            and not any(c in filename for c in ("/", "\\", "\x00")))
+
+
+@app.route("/api/media/<kind>/<path:filename>")
+def uploaded_media(kind: str, filename: str):
+    if not _SERVERLESS or kind not in {"bgm", "backgrounds"}:
+        return jsonify({"error": "文件不存在"}), 404
+    directory = BGM_DIR if kind == "bgm" else BACKGROUND_DIR
+    return send_from_directory(directory, filename)
 
 @app.route("/api/bgm/list")
 def api_bgm_list():
@@ -1072,7 +1097,7 @@ def api_bgm_list():
             tracks.append({
                 "name": name,
                 "file": f.name,
-                "url": f"/static/bgm/{f.name}",
+                "url": _media_url("bgm", f.name),
                 "size": f.stat().st_size,
             })
     
@@ -1088,6 +1113,8 @@ def api_bgm_upload():
     file = request.files['file']
     if not file.filename:
         return jsonify({"error": "文件名为空"}), 400
+    if not _valid_media_filename(file.filename):
+        return jsonify({"error": "无效的文件名"}), 400
     
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ['.mp3', '.wav', '.ogg', '.m4a']:
@@ -1105,7 +1132,7 @@ def api_bgm_upload():
         "ok": True,
         "name": filepath.stem,
         "file": filename,
-        "url": f"/static/bgm/{filename}",
+        "url": _media_url("bgm", filename),
     })
 
 
@@ -1124,7 +1151,7 @@ def api_bgm_delete():
         return jsonify({"error": "文件不存在"}), 404
     
     # 确保文件在bgm目录下
-    if not str(filepath.resolve()).startswith(str(BGM_DIR.resolve())):
+    if not filepath.resolve().is_relative_to(BGM_DIR.resolve()):
         return jsonify({"error": "无效的文件路径"}), 400
 
     filepath.unlink()
@@ -1132,9 +1159,16 @@ def api_bgm_delete():
 
 
 # ========== 背景图片管理 ==========
-BACKGROUND_DIR = Path(__file__).parent / "static" / "backgrounds"
-BACKGROUND_STATE_FILE = Path(__file__).parent / "data" / "background_state.json"
+BACKGROUND_DIR = (_MEDIA_ROOT / "backgrounds" if _MEDIA_ROOT else
+                  Path(__file__).parent / "static" / "backgrounds")
+BACKGROUND_STATE_FILE = (_MEDIA_ROOT / "background_state.json" if _MEDIA_ROOT else
+                         Path(__file__).parent / "data" / "background_state.json")
 ALLOWED_BG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
+
+if _SERVERLESS and not BACKGROUND_DIR.exists():
+    import shutil
+    shutil.copytree(Path(__file__).parent / "static" / "backgrounds", BACKGROUND_DIR)
 
 
 def _load_bg_state() -> dict:
@@ -1168,7 +1202,7 @@ def api_background_list():
             items.append({
                 "name": f.stem,
                 "file": f.name,
-                "url": f"/static/backgrounds/{f.name}",
+                "url": _media_url("backgrounds", f.name),
                 "size": f.stat().st_size,
             })
     state = _load_bg_state()
@@ -1183,6 +1217,8 @@ def api_background_upload():
     f = request.files['file']
     if not f.filename:
         return jsonify({"error": "文件名为空"}), 400
+    if not _valid_media_filename(f.filename):
+        return jsonify({"error": "无效的文件名"}), 400
     ext = os.path.splitext(f.filename)[1].lower()
     if ext not in ALLOWED_BG_EXT:
         return jsonify({"error": f"不支持的格式，仅支持 {', '.join(sorted(ALLOWED_BG_EXT))}"}), 400
@@ -1200,7 +1236,7 @@ def api_background_upload():
                 break
             i += 1
     f.save(str(target))
-    return jsonify({"ok": True, "file": target.name, "url": f"/static/backgrounds/{target.name}"})
+    return jsonify({"ok": True, "file": target.name, "url": _media_url("backgrounds", target.name)})
 
 
 @app.route("/api/background/delete", methods=["POST"])
@@ -1213,7 +1249,7 @@ def api_background_delete():
     filepath = BACKGROUND_DIR / filename
     if not filepath.exists():
         return jsonify({"error": "文件不存在"}), 404
-    if not str(filepath.resolve()).startswith(str(BACKGROUND_DIR.resolve())):
+    if not filepath.resolve().is_relative_to(BACKGROUND_DIR.resolve()):
         return jsonify({"error": "无效的文件路径"}), 400
     # 如果删的是当前选中的，清除选择
     state = _load_bg_state()
@@ -1239,7 +1275,7 @@ def api_background_select():
         filepath = BACKGROUND_DIR / filename
         if not filepath.exists():
             return jsonify({"error": "文件不存在"}), 404
-        if not str(filepath.resolve()).startswith(str(BACKGROUND_DIR.resolve())):
+        if not filepath.resolve().is_relative_to(BACKGROUND_DIR.resolve()):
             return jsonify({"error": "无效的文件路径"}), 400
         state["selected"] = filename
 
@@ -1257,7 +1293,7 @@ def api_background_current():
     filepath = BACKGROUND_DIR / sel
     if not filepath.exists():
         return jsonify({"url": None})
-    return jsonify({"url": f"/static/backgrounds/{sel}"})
+    return jsonify({"url": _media_url("backgrounds", sel)})
 
 
 @app.route("/api/recommend/by-quiz", methods=["POST"])

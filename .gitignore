@@ -24,3 +24,7 @@ static/bgm/
 .idea/
 *.swp
 .DS_Store
+
+# Generated deployment output
+.vercel/
+public/

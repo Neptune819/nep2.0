@@ -32,6 +32,7 @@ data_loader.py
 import os
 import re
 import json
+import gzip
 import time
 import unicodedata
 import requests
@@ -822,12 +823,19 @@ _JAPANESE_STUDIOS = frozenset({
 
 
 def load_cache() -> list:
-    if not CACHE_FILE.exists():
+    snapshot = CACHE_FILE.with_suffix(".json.gz")
+    if CACHE_FILE.exists():
+        source = open(CACHE_FILE, "r", encoding="utf-8")
+    elif snapshot.exists():
+        # Serverless hosts expose the application bundle as read-only. Read the
+        # bundled snapshot directly instead of expanding it beside the source.
+        source = gzip.open(snapshot, "rt", encoding="utf-8")
+    else:
         raise FileNotFoundError(
             f"缓存不存在: {CACHE_FILE}\n"
             f"请先运行: python scripts/fetch_data.py"
         )
-    with open(CACHE_FILE, "r", encoding="utf-8") as f:
+    with source as f:
         data = json.load(f)
     # 运行时二次过滤：排除非番剧格式 + 排除国漫
     titles = _get_bangumi_titles()

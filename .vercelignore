@@ -1,0 +1,9 @@
+.env
+.git
+.venv
+venv
+__pycache__
+data/anime_cache.json
+static/bgm
+public
+*.docx
